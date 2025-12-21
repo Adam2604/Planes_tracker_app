@@ -9,6 +9,28 @@ def text_from_bits(bits):
     except ValueError:
         return ""
     
+def decode_details(hex_msg):
+    tc = pms.typecode(hex_msg)
+
+    #1. Nazwa lotu
+    if 1 <= tc <= 4:
+        callsing = pms.adsb.callsign(hex_msg)
+        print(f"Nazwa lotu: {callsing}")
+    
+    #2. Wysokość
+    elif 9 <= tc <= 18:
+        altitude = pms.adsb.altitude(hex_msg)
+        altitude_meters = round(altitude * 0.3048)
+        print(f"Wysokość: {altitude_meters} m")
+
+    #3. Prędkość i kurs
+    elif tc == 19:
+        velocity = pms.adsb.velocity(hex_msg)
+        if velocity:
+            speed, heading, rate, v_type = velocity
+            speed_kmh = round(speed * 1.852)
+            print(f"Prędkość: {speed_kmh} km/h, Kurs: {heading:.2f}°")
+
 def main():
     #Konfiguracja
     sdr = RtlSdr()
@@ -59,6 +81,7 @@ def main():
                             icao = pms.icao(hex_msg)
                             tc = pms.typecode(hex_msg)
                             print(f"Odebrano wiadomość od samolotu ICAO: {icao}, \nType Code: {tc}, HEX: {hex_msg}")
+                            decode_details(hex_msg)
                             print("-"*40)
                     except:
                         pass

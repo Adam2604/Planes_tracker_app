@@ -26,6 +26,8 @@ def text_from_bits(bits):
     
 def decode_details(hex_msg):
     tc = pms.typecode(hex_msg)
+    icao = pms.icao(hex_msg)
+    now = time.time()
 
     #1. Nazwa lotu
     if 1 <= tc <= 4:
@@ -36,7 +38,25 @@ def decode_details(hex_msg):
     elif 9 <= tc <= 18:
         altitude = pms.adsb.altitude(hex_msg)
         altitude_meters = round(altitude * 0.3048)
+        actualize_plane(icao, {"altitude": altitude_meters})
         print(f"Wysokość: {altitude_meters} m")
+
+        #Logika pozycji - Odd/Even
+        oe = pms.adsb.oe_flag(hex_msg)
+        if icao not in cpr_buffer:
+            cpr_buffer[icao] = [None, None] #Even, Odd
+        cpr_buffer[icao][oe] = (hex_msg, now)
+
+        even, odd = cpr_buffer[icao]
+        if even and odd and abs(even[1] - odd[1]) < 10:
+            pos = pms.adsb.position(even[0], odd[0], even[1], odd[1], MY_LAT, MY_LON)
+            if pos:
+                dist = calculate_distance(MY_LAT, MY_LON, pos[0], pos[1])
+                actualize_plane(icao,{
+                    "lat": pos[0],
+                    "lon": pos[1],
+                    "dist": round(dist, 1)
+                })
 
     #3. Prędkość i kurs
     elif tc == 19:
@@ -44,10 +64,11 @@ def decode_details(hex_msg):
         if velocity:
             speed, heading, rate, v_type = velocity
             speed_kmh = round(speed * 1.852)
-            if v_type == "GS":
-                print(f"Prędkość względem ziemi: {speed_kmh} km/h, Kurs: {heading:.2f}°")
-            elif v_type == "IAS" or v_type == "TAS":
-                print(f"Prędkość powietrzna (IAS/TAS): {speed_kmh} km/h")
+            actualize_plane(icao, {
+                "speed": speed_kmh,
+                "heading": heading,
+                "v_type": v_type
+            })
 
 def calculate_distance(lat1, lon1, lat2, lon2):
     #Obliczanie odległości do samolotu za pomocą wzoru Haversine'a
@@ -58,7 +79,15 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     a = math.sin(delta_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
     return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
 
-def main():
+def actualize_plane(icao, dane):
+    #Aktualizuje lub tworzy samolot w bazie danych
+    with planes_lock:
+        if icao not in planes:
+            planes[icao] = {"icao": icao, "first_seen": time.time()}
+        planes[icao].update(dane)
+        planes[icao]["last_seen"] = time.time()
+
+def radio_loop():
     #Konfiguracja
     sdr = RtlSdr()
     sdr.sample_rate = 2000000
@@ -117,5 +146,18 @@ def main():
     finally:
         sdr.close()
 
+
+@app.route('/data')
+def get_planes():
+    with planes_lock:
+        return jsonify(list(planes.values()))
+    
+@app.route('/')
+def index():
+    return f"Radar działa. Slędzę {len(planes)} samolotów.</h1> <a href='/data'>Pokaż JSON</a>"
+
 if __name__ == "__main__":
-    main()
+    #uruchomienie wątków
+    threading.Thread(target=radio_loop, daemon=True).start()
+
+    app.run(host='0.0.0.0', port=5000, debug = False)

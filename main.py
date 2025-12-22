@@ -87,6 +87,19 @@ def actualize_plane(icao, dane):
         planes[icao].update(dane)
         planes[icao]["last_seen"] = time.time()
 
+def cleaner():
+    #Usuwanie samolotów, które nie były widziane przez minutę
+    while True:
+        time.sleep(5)
+        limit = time.time() - 60
+        with planes_lock:
+            old = [k for k, v in planes.items() if v["last_seen"] < limit]
+            for k in old:
+                del planes[k]
+                if k in cpr_buffer:
+                    del cpr_buffer[k]
+
+
 def radio_loop():
     #Konfiguracja
     sdr = RtlSdr()
@@ -159,5 +172,6 @@ def index():
 if __name__ == "__main__":
     #uruchomienie wątków
     threading.Thread(target=radio_loop, daemon=True).start()
+    threading.Thread(target=cleaner, daemon=True).start()
 
     app.run(host='0.0.0.0', port=5000, debug = False)

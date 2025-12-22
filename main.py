@@ -29,7 +29,10 @@ def decode_details(hex_msg):
         if velocity:
             speed, heading, rate, v_type = velocity
             speed_kmh = round(speed * 1.852)
-            print(f"Prędkość: {speed_kmh} km/h, Kurs: {heading:.2f}°")
+            if v_type == "GS":
+                print(f"Prędkość względem ziemi: {speed_kmh} km/h, Kurs: {heading:.2f}°")
+            elif v_type == "IAS" or v_type == "TAS":
+                print(f"Prędkość powietrzna (IAS/TAS): {speed_kmh} km/h")
 
 def main():
     #Konfiguracja

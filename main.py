@@ -5,6 +5,7 @@ import time
 import threading
 import math
 from flask import Flask, jsonify
+import csv
 
 #Moje współrzędne
 MY_LAT = 51.978
@@ -14,8 +15,35 @@ MY_LON = 17.498
 planes = {} #aktualny stan samolotów
 cpr_buffer = {} #bufor do obliczania pozycji
 planes_lock = threading.Lock() #zabezpieczenie przed konfiktem wątków
+planes_data = {}
 
 app = Flask(__name__)
+
+def load_csv_data():
+    print("Ładowanie bazy samolotów...")
+    try:
+        with open("samoloty.csv", mode='r', encoding = 'utf-8') as file:
+            reader = csv.DictReader(file, quotechar="'")
+            count = 0
+            for row in reader:
+                icao = row.get('icao24', '').upper()
+
+                #W poniższych zmiennych opisany dokładny model samolotu
+                producer = row.get('manufacturerName', '')
+                model = row.get('model', '')
+                operator = row.get('operator', '')
+                all = f"{producer} {model}"
+                if operator:
+                    all += f"[{operator}]"
+
+                planes_data[icao] = all
+                count += 1
+
+        print(f"Wczytano dane {count} samolotów.")
+    except FileNotFoundError:
+        print("Brak pliku samoloty.csv, dane o modelach samolotów nie będą dostępne.")
+    except Exception as e:
+        print(f"Błąd podczas wczytywania bazy: {e}")
 
 def text_from_bits(bits):
     try:
@@ -32,7 +60,8 @@ def decode_details(hex_msg):
     #1. Nazwa lotu
     if 1 <= tc <= 4:
         callsing = pms.adsb.callsign(hex_msg)
-        print(f"Nazwa lotu: {callsing}")
+        print(f"Nazwa lotu: {callsing.strip()}")
+        actualize_plane(icao, {"callsign": callsing.strip()})
     
     #2. Wysokość
     elif 9 <= tc <= 18:
@@ -52,6 +81,7 @@ def decode_details(hex_msg):
             pos = pms.adsb.position(even[0], odd[0], even[1], odd[1], MY_LAT, MY_LON)
             if pos:
                 dist = calculate_distance(MY_LAT, MY_LON, pos[0], pos[1])
+                print(f"Samolot znajduje się {dist:.1f} km ode mnie")
                 actualize_plane(icao,{
                     "lat": pos[0],
                     "lon": pos[1],
@@ -64,6 +94,10 @@ def decode_details(hex_msg):
         if velocity:
             speed, heading, rate, v_type = velocity
             speed_kmh = round(speed * 1.852)
+            if v_type == "GS":
+                print(f"Prędkość względem ziemi: {speed_kmh} km/h, Kurs: {heading:.2f}°")
+            elif v_type == "IAS" or v_type == "TAS":
+                print(f"Prędkość powietrzna (IAS/TAS): {speed_kmh} km/h")
             actualize_plane(icao, {
                 "speed": speed_kmh,
                 "heading": heading,
@@ -83,7 +117,13 @@ def actualize_plane(icao, dane):
     #Aktualizuje lub tworzy samolot w bazie danych
     with planes_lock:
         if icao not in planes:
-            planes[icao] = {"icao": icao, "first_seen": time.time()}
+            #Gdy odebrano sygnał samolotu po raz pierwszy to szukamy go w bazie
+            model_info = planes_data.get(icao, "Nieznany model")
+            planes[icao] = {
+                "icao": icao,
+                "first_seen": time.time(),
+                "model": model_info
+            }
         planes[icao].update(dane)
         planes[icao]["last_seen"] = time.time()
 
@@ -170,6 +210,7 @@ def index():
     return f"Radar działa. Slędzę {len(planes)} samolotów.</h1> <a href='/data'>Pokaż JSON</a>"
 
 if __name__ == "__main__":
+    load_csv_data()
     #uruchomienie wątków
     threading.Thread(target=radio_loop, daemon=True).start()
     threading.Thread(target=cleaner, daemon=True).start()

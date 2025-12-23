@@ -6,12 +6,13 @@ import threading
 import math
 from flask import Flask, jsonify
 import csv
+import data_base
 
 #Moje współrzędne
 MY_LAT = 51.978
 MY_LON = 17.498
 
-#Baza danych
+#Bazy danych
 planes = {} #aktualny stan samolotów
 cpr_buffer = {} #bufor do obliczania pozycji
 planes_lock = threading.Lock() #zabezpieczenie przed konfiktem wątków
@@ -59,9 +60,10 @@ def decode_details(hex_msg):
 
     #1. Nazwa lotu
     if 1 <= tc <= 4:
-        callsing = pms.adsb.callsign(hex_msg)
+        callsing = pms.adsb.callsign(hex_msg).strip()
+        category = pms.adsb.category(hex_msg)
         print(f"Nazwa lotu: {callsing.strip()}")
-        actualize_plane(icao, {"callsign": callsing.strip()})
+        actualize_plane(icao, {"callsign": callsing, "category": category})
     
     #2. Wysokość
     elif 9 <= tc <= 18:
@@ -122,19 +124,35 @@ def actualize_plane(icao, dane):
             planes[icao] = {
                 "icao": icao,
                 "first_seen": time.time(),
-                "model": model_info
+                "model": model_info,
+                "dist": 9999,  #domyślna wartość dystansu
+                "min_dist": 9999,
+                "speed": 0,
+                "max_speed": 0,
+                "category": 0
             }
         planes[icao].update(dane)
         planes[icao]["last_seen"] = time.time()
+
+        if "dist" in dane:
+            if dane["dist"] < planes[icao]["min_dist"]:
+                planes[icao]["min_dist"] = dane["dist"]
+
+        if "speed" in dane:
+            if dane["speed"] > planes[icao]["max_speed"]:
+                planes[icao]["max_speed"] = dane["speed"]
 
 def cleaner():
     #Usuwanie samolotów, które nie były widziane przez minutę
     while True:
         time.sleep(5)
         limit = time.time() - 60
+        data_base.delete_old_data()
         with planes_lock:
             old = [k for k, v in planes.items() if v["last_seen"] < limit]
             for k in old:
+                #Najpiew zapisz do bazy a potem usuń
+                data_base.save_flight(planes[k])
                 del planes[k]
                 if k in cpr_buffer:
                     del cpr_buffer[k]
@@ -199,11 +217,15 @@ def radio_loop():
     finally:
         sdr.close()
 
-
 @app.route('/data')
-def get_planes():
+def get_data():
     with planes_lock:
         return jsonify(list(planes.values()))
+
+@app.route('/stats')
+def get_stats():
+    stats = data_base.get_stat_today()
+    return jsonify(stats)
     
 @app.route('/')
 def index():
@@ -211,6 +233,7 @@ def index():
 
 if __name__ == "__main__":
     load_csv_data()
+    data_base.init_db()
     #uruchomienie wątków
     threading.Thread(target=radio_loop, daemon=True).start()
     threading.Thread(target=cleaner, daemon=True).start()

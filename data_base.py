@@ -18,11 +18,11 @@ def init_db():
                     first_seen INTEGER,
                     last_seen INTEGER
                 )''')
+    c.execute("CREATE INDEX IF NOT EXISTS idx_icao_time ON historia (icao, last_seen)")
     conn.commit()
     conn.close()
 
 def save_flight(plane):
-    # Lot jest zapisywane gdy samolot znika z radaru
     # Ignorujemy szumy (krótsze niż 10s)
     if plane['last_seen'] - plane['first_seen'] < 10:
         return
@@ -30,25 +30,61 @@ def save_flight(plane):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     
-    min_dist = plane.get('min_dist', 9999)
-    has_loc = 1 if min_dist != 9999 else 0
+    # Dane do zapisu
+    icao = plane.get('icao')
+    current_min_dist = plane.get('min_dist', 9999)
+    current_speed = plane.get('speed', 0)
+    current_max_speed = plane.get('max_speed', current_speed) 
+    current_last_seen = int(plane['last_seen'])
+    
+    today_midnight = datetime.combine(date.today(), datetime.min.time()).timestamp()
 
-    c.execute("INSERT INTO historia VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (
-        plane.get('icao'),
-        plane.get('callsign', 'N/A'),
-        plane.get('model', 'Nieznany'),
-        min_dist,
-        plane.get('speed', 0),
-        plane.get('category', 0),
-        has_loc,
-        int(plane['first_seen']),
-        int(plane['last_seen'])
-    ))
+    # Sprawdzamy, czy ten samolot już był dzisiaj w bazie
+    c.execute("""SELECT rowid, min_dist, max_speed, first_seen, has_location 
+                 FROM historia 
+                 WHERE icao = ? AND last_seen > ?""", (icao, today_midnight))
+    
+    existing_row = c.fetchone()
+
+    if existing_row:
+        # Samolot już był dzisiaj. Scalamy dane.
+        row_id, old_dist, old_speed, old_first, old_has_loc = existing_row
+        
+        # Wybieramy najlepsze wartości z obu przelotów
+        new_best_dist = min(old_dist, current_min_dist)
+        new_best_speed = max(old_speed, current_max_speed)
+        new_has_loc = 1 if new_best_dist != 9999 else 0
+        
+        # Aktualizujemy rekord
+        c.execute("""UPDATE historia SET 
+                     last_seen = ?, 
+                     min_dist = ?, 
+                     max_speed = ?,
+                     has_location = ?
+                     WHERE rowid = ?""", 
+                     (current_last_seen, new_best_dist, new_best_speed, new_has_loc, row_id))
+
+    else:
+        # NOWY WPIS
+        has_loc = 1 if current_min_dist != 9999 else 0
+        
+        c.execute("INSERT INTO historia VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (
+            icao,
+            plane.get('callsign', 'N/A'),
+            plane.get('model', 'Nieznany'),
+            current_min_dist,
+            current_max_speed,
+            plane.get('category', 0),
+            has_loc,
+            int(plane['first_seen']),
+            current_last_seen
+        ))
+
     conn.commit()
     conn.close()
 
 def get_stat_today():
-    """Zwraca statystyki od północy do teraz"""
+    #Zwraca statystyki od północy do teraz
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     today_midnight = datetime.combine(date.today(), datetime.min.time()).timestamp()

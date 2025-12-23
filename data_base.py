@@ -61,11 +61,11 @@ def get_stat_today():
     c.execute("SELECT COUNT(*) FROM historia WHERE last_seen > ? AND min_dist <= 5.0", (today_midnight,))
     near_5km = c.fetchone()[0]
     
-    # 3. Najrzadszy model w promieniu 5 km
+    # 3. Najrzadszy model
     c.execute("""
         SELECT model, COUNT(*) as cnt 
         FROM historia 
-        WHERE last_seen > ? AND min_dist <= 5.0 
+        WHERE last_seen > ? 
         GROUP BY model 
         ORDER BY cnt ASC 
         LIMIT 1

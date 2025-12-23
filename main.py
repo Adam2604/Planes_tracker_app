@@ -4,7 +4,7 @@ import pyModeS as pms #biblioteka do wyciągania danych samolotu
 import time
 import threading
 import math
-from flask import Flask, jsonify
+from flask import Flask, jsonify, render_template
 import csv
 import data_base
 
@@ -229,7 +229,7 @@ def get_stats():
     
 @app.route('/')
 def index():
-    return f"Radar działa. Slędzę {len(planes)} samolotów.</h1> <a href='/data'>Pokaż JSON</a>"
+    return render_template('index.html')
 
 if __name__ == "__main__":
     load_csv_data()

@@ -7,6 +7,8 @@ import math
 from flask import Flask, jsonify, render_template
 import csv
 import data_base
+import os
+import sys
 
 #Moje współrzędne
 MY_LAT = 51.978
@@ -19,6 +21,8 @@ planes_lock = threading.Lock() #zabezpieczenie przed konfiktem wątków
 planes_data = {}
 
 app = Flask(__name__)
+
+last_packet_time = time.time() #czas ostatniego pakietu do sprawdzania czy program się nie zawiesił
 
 def load_csv_data():
     print("Ładowanie bazy samolotów...")
@@ -157,6 +161,14 @@ def cleaner():
                 if k in cpr_buffer:
                     del cpr_buffer[k]
 
+def watchdog():
+    #Sprawdza czy program się nie zawiesił i w razie co go resetuje
+    print("Watchdog uruchomiony.")
+    while True:
+        time.sleep(60) #sprawdzanie co minutę
+        if time.time() - last_packet_time > 7200: #brak pakietów przez 2 godziny
+            print("Brak sygnału przez 2 godziny, restart programu.")
+            os.execv(sys.executable, ['python'] + sys.argv)
 
 def radio_loop():
     #Konfiguracja
@@ -164,6 +176,8 @@ def radio_loop():
     sdr.sample_rate = 2000000
     sdr.center_freq = 1090000000
     sdr.freq_correction = 1
+
+    global last_packet_time
 
     print("Czekam na sygnał")
     try:
@@ -205,6 +219,7 @@ def radio_loop():
                 if hex_msg.startswith("8D"):
                     try:
                         if pms.crc(hex_msg) == 0:
+                            last_packet_time = time.time()  #aktualizacja czasu ostatniego pakietu
                             icao = pms.icao(hex_msg)
                             tc = pms.typecode(hex_msg)
                             print(f"Odebrano wiadomość od samolotu ICAO: {icao}, \nType Code: {tc}, HEX: {hex_msg}")
@@ -237,5 +252,6 @@ if __name__ == "__main__":
     #uruchomienie wątków
     threading.Thread(target=radio_loop, daemon=True).start()
     threading.Thread(target=cleaner, daemon=True).start()
+    threading.Thread(target=watchdog, daemon=True).start()
 
     app.run(host='0.0.0.0', port=5000, debug = False)

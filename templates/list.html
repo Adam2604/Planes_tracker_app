@@ -49,7 +49,6 @@
         }
 
         tr:last-child td { border-bottom: none; }
-    
         tr:nth-child(even) { background-color: #303030; }
 
         .icao-tag {
@@ -89,7 +88,13 @@
                     <span class="icao-tag">{{ f.icao }}</span>
                 </td>
                 <td>
-                    <span class="dist-tag">{{ f.dist }} km</span>
+                    <span class="dist-tag">
+                        {% if f.dist >= 9999 %}
+                            -
+                        {% else %}
+                            {{ f.dist }} km
+                        {% endif %}
+                    </span>
                 </td>
             </tr>
             {% endfor %}

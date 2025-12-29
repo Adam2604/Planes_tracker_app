@@ -159,6 +159,37 @@ def get_stat_today():
         "stat_light": lekkie_5km
     }
 
+def get_flights_list():
+    #Pobiera listę lotów z dzisiaj do wyświetlenia w tabeli
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    today_midnight = datetime.combine(date.today(), datetime.min.time()).timestamp()
+    
+    c.execute("""
+        SELECT icao, model, last_seen, min_dist, max_speed 
+        FROM historia 
+        WHERE last_seen > ? 
+        ORDER BY last_seen DESC
+    """, (today_midnight,))
+    
+    rows = c.fetchall()
+    conn.close()
+    
+    results = []
+    for row in rows:
+        # Konwersja znacznika czasu na godzinę (np. "15:43")
+        time_str = datetime.fromtimestamp(row[2]).strftime('%H:%M')
+        
+        results.append({
+            "icao": row[0],
+            "model": row[1],
+            "time": time_str,
+            "dist": round(row[3], 1),
+            "speed": row[4]
+        })
+        
+    return results
+
 def delete_old_data():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()

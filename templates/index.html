@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Radar Jarocin</title>
+    <title>Radar Samolotowy</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -12,10 +12,10 @@
         body { margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background: #1a1a1a; color: white; }
         #map { height: 100vh; width: 100%; z-index: 1; }
         
-        /* Panel Statystyk*/
+        /* Panel Statystyk (szybki podgląd) */
         #stats-panel {
             position: absolute;
-            top: 10px;
+            top: 30px;
             left: 10px;
             background: rgba(0, 0, 0, 0.8);
             padding: 15px;
@@ -30,7 +30,52 @@
         .stat-val { font-weight: bold; color: #fff; }
         .highlight { color: #ffeb3b; }
         
-        /* Etykiety samolotów na mapie */
+        .bottom-nav {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 400px;
+            background: rgba(20, 20, 20, 0.95);
+            padding: 10px;
+            border-radius: 50px;
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            z-index: 2000;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            backdrop-filter: blur(10px);
+            border: 1px solid #333;
+        }
+
+        .nav-btn {
+            flex: 1; /* Przyciski zajmują równą szerokość */
+            text-decoration: none;
+            color: white;
+            padding: 12px 0;
+            text-align: center;
+            border-radius: 25px;
+            font-weight: 600;
+            font-size: 16px;
+            transition: transform 0.1s, background 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        .btn-list {
+            background: #4CAF50;
+            color: white;
+        }
+        .btn-stats {
+            background: #333;
+            border: 1px solid #444;
+        }
+        .nav-btn:active {
+            transform: scale(0.95);
+            opacity: 0.9;
+        }
         .plane-label {
             background: rgba(255, 255, 255, 0.9);
             border: 1px solid #333;
@@ -40,26 +85,25 @@
             font-weight: bold;
             white-space: nowrap;
         }
-        .plane-div-icon {
-            background: transparent;
-            border: none;
+        .plane-div-icon { background: transparent; border: none; }
+        .plane-img { width: 35px; height: 35px; transition: transform 0.3s linear; transform-origin: center center; }
+
+        .leaflet-control-layers {
+            margin-bottom: 100px !important;
+            margin-right: 10px !important;
         }
 
-        .plane-img {
-            width: 35px;
-            height: 35px;
-            transition: transform 0.3s linear; 
-            transform-origin: center center;
+        .leaflet-control-attribution {
+            opacity: 0.6;
         }
     </style>
 </head>
 <body>
 
     <div id="stats-panel">
-        <h2>📊 Statystyki Dnia</h2>
+        <h2>📊 Szybki podgląd</h2>
         <div class="stat-row"><span>Wszystkie loty:</span> <span id="s-total" class="stat-val">0</span></div>
         <div class="stat-row"><span>Blisko (<5km):</span> <span id="s-close" class="stat-val">0</span></div>
-        <div class="stat-row"><span>Lekkie (<5km):</span> <span id="s-light" class="stat-val">0</span></div>
         <div class="stat-row"><span>Wojskowe (Ghost):</span> <span id="s-mil" class="stat-val">NIE</span></div>
         <div style="margin-top: 10px; font-size: 12px; color: #aaa;">Najrzadszy dziś:</div>
         <div id="s-rare" class="stat-val highlight" style="font-size: 13px;">Brak danych</div>
@@ -67,40 +111,29 @@
 
     <div id="map"></div>
 
+    <div class="bottom-nav">
+        <a href="/stats" class="nav-btn btn-stats">📊 Statystyki</a>
+        <a href="/list" class="nav-btn btn-list">📋 Lista</a>
+    </div>
+
     <script>
-        //Definicja Warstw (Wygląd mapy)
         // A. Widok Satelitarny
         var satelita = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-            attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
-            maxZoom: 19
+            attribution: 'Tiles &copy; Esri', maxZoom: 19
         });
-
         // B. Widok Terenu
         var teren = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenStreetMap contributors',
-            maxZoom: 19
+            attribution: '&copy; OpenStreetMap', maxZoom: 19
         });
-
         // C. Widok Ciemny
         var ciemna = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-            maxZoom: 20
+            attribution: '&copy; Carto', maxZoom: 20
         });
 
-        // Inicjalizacja mapy (Domyślnie ustawiamy "teren")
-        var map = L.map('map', {
-            center: [51.978, 17.498],
-            zoom: 11,
-            layers: [teren]
-        });
+        var map = L.map('map', { center: [51.978, 17.498], zoom: 11, layers: [teren], zoomControl: false });
 
-        // Dodanie przełącznika warstw
-        var baseMaps = {
-            "Satelita 🛰️": satelita,
-            "Mapa Terenu 🗺️": teren,
-            "Tryb Nocny 🌙": ciemna
-        };
-        L.control.layers(baseMaps).addTo(map);
+        var baseMaps = { "Satelita 🛰️": satelita, "Mapa Terenu 🗺️": teren, "Tryb Nocny 🌙": ciemna };
+        L.control.layers(baseMaps, null, { position: 'bottomright' }).addTo(map);
 
         L.marker([51.978, 17.498]).addTo(map).bindPopup("🏠 Baza (Jarocin)");
         L.circle([51.978, 17.498], {radius: 5000, color: '#4CAF50', fill: false, weight: 2}).addTo(map);
@@ -108,21 +141,11 @@
 
         function createPlaneIcon(heading, category) {
             let angle = heading || 0;
-            let imageSource;
-            
-            if (category === 1) {
-                // Lekkie samoloty
-                imageSource = '/static/plane_light.png';
-            } else {
-                // Inne samoloty
-                imageSource = '/static/plane.png';
-            }
+            let imageSource = (category === 1) ? '/static/plane_light.png' : '/static/plane.png';
             return L.divIcon({
                 className: 'plane-div-icon',
                 html: `<img src="${imageSource}" class="plane-img" style="transform: rotate(${angle}deg);">`,
-                iconSize: [30, 30],
-                iconAnchor: [15, 15],
-                popupAnchor: [0, -15]
+                iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -15]
             });
         }
 
@@ -130,8 +153,6 @@
             try {
                 let response = await fetch('/data');
                 let planes = await response.json();
-
-                // Usuń stare markery, których już nie ma
                 let currentIcaos = planes.map(p => p.icao);
                 for (let icao in planesMarkers) {
                     if (!currentIcaos.includes(icao)) {
@@ -139,61 +160,40 @@
                         delete planesMarkers[icao];
                     }
                 }
-
                 planes.forEach(p => {
-                    // Pokaż tylko te, które mają pozycję (lat/lon)
                     if (p.lat && p.lon) {
-                        let iconColor = p.category === 1 ? 'yellow' : 'cyan'; // Żółty dla lekkich
-                        
-                        let popupText = `<b>${p.callsign || p.icao}</b><br>
-                                         ${p.model}<br>
-                                         Alt: ${p.alt}m | Spd: ${p.speed}km/h<br>
-                                         Dist: ${p.dist}km`;
-
+                        let popupText = `<b>${p.callsign || p.icao}</b><br>${p.model}<br>Wys: ${p.altitude}m | Pręd: ${p.speed}km/h<br>Odl: ${p.dist}km`;
                         let icon = createPlaneIcon(p.heading, p.category);
-
                         if (planesMarkers[p.icao]) {
-                            // Aktualizuj pozycję istniejącego
                             let marker = planesMarkers[p.icao];
                             marker.setLatLng([p.lat, p.lon]);
                             marker.setPopupContent(popupText);
-                            // Obrót ikony 
                             marker.setIcon(icon);
                         } else {
-                            // Stwórz nowy marker
-                            let marker = L.marker([p.lat, p.lon], { icon: icon })
-                                .bindPopup(popupText)
-                                .addTo(map);
-                            
+                            let marker = L.marker([p.lat, p.lon], { icon: icon }).bindPopup(popupText).addTo(map);
                             planesMarkers[p.icao] = marker;
                         }
                     }
                 });
-            } catch (e) { console.error("Błąd pobierania danych", e); }
+            } catch (e) { console.error("Błąd danych", e); }
         }
 
-        // Funkcja aktualizacji statystyk (co 5 sek)
         async function updateStats() {
             try {
                 let response = await fetch('/stats');
                 let s = await response.json();
-
                 document.getElementById('s-total').innerText = s.stat_total;
                 document.getElementById('s-close').innerText = s.stat_close;
                 document.getElementById('s-light').innerText = s.stat_light;
-                
                 let milElem = document.getElementById('s-mil');
                 milElem.innerText = s.stat_military_ghost ? "TAK! ⚠️" : "NIE";
                 milElem.style.color = s.stat_military_ghost ? "red" : "white";
-
                 document.getElementById('s-rare').innerText = s.stat_rarest;
-
             } catch (e) { console.error("Błąd statystyk", e); }
         }
 
-        // Uruchom pętle
-        setInterval(updatePlanes, 1000); // Odświeżanie mapy co 1s
-        setInterval(updateStats, 5000);  // Statystyki co 5s
+        setInterval(updatePlanes, 1000);
+        setInterval(updateStats, 5000);
         updatePlanes();
         updateStats();
     </script>

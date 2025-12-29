@@ -241,7 +241,12 @@ def get_data():
 def get_stats():
     stats = data_base.get_stat_today()
     return jsonify(stats)
-    
+
+@app.route('/list')
+def list_page():
+    flights = data_base.get_flights_list()
+    return render_template('list.html', flights=flights)
+
 @app.route('/')
 def index():
     return render_template('index.html')

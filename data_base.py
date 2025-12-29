@@ -83,6 +83,21 @@ def save_flight(plane):
     conn.commit()
     conn.close()
 
+def rarity_check(model_text):
+    #zwraca punkty w zależności od rzadkości samolotu
+    text = model_text.upper()
+
+    #lista "VIP" -> najrzadsze samoloty 100 pkt
+    vip = ["AIR FORCE", "MILITARY", "NATO", "NAVY", "POLICE", "LPR", "CESSNA", "PIPER", "ANTONOV", "ROBINSON"]
+    if any(x in text for x in vip): return 100
+
+    #lista częstych samolotów -> 0 pkt
+    common = ["BOEING 737", "AIRBUS A320", "AIRBUS A321", "EMBRAER", "RYANAIR", "WIZZAIR", "CRJ", "ATR 72"]
+    if any(x in text for x in common): return 0
+
+    #reszta 10 pkt
+    return 10
+
 def get_stat_today():
     #Zwraca statystyki od północy do teraz
     conn = sqlite3.connect(DB_NAME)
@@ -98,19 +113,24 @@ def get_stat_today():
     near_5km = c.fetchone()[0]
     
     # 3. Najrzadszy model
-    c.execute("""
-        SELECT model, COUNT(*) as cnt 
-        FROM historia 
-        WHERE last_seen > ? 
-        GROUP BY model 
-        ORDER BY cnt ASC 
-        LIMIT 1
-    """, (today_midnight,))
-    rearest = c.fetchone()
-    if rearest:
-        rearest = f"{rearest[0]} (widziany {rearest[1]} raz)"
-    else:
-        rearest = "Brak przelotów < 5km"
+    c.execute("SELECT model FROM historia WHERE last_seen > ?", (today_midnight,))
+    rows = c.fetchall()
+    best_model = "Brak danych"
+    max_score = -1
+    found_any_valid = False
+    for row in rows:
+        model = row[0]
+        if not model or 'NIEZNANY' in model.upper():
+            continue
+        
+        found_any_valid = True
+        score = rarity_check(model)
+        if score >= max_score:
+            max_score = score
+            best_model = model
+
+    if total > 0 and not found_any_valid:
+        best_model = "Tylko niezidentyfikowane"
 
     # 4. Samolot wojskowy bez lokalizacji
     key_words = ['Military', 'Air Force', 'NATO', 'Army', 'Polish Air Force']
@@ -134,7 +154,7 @@ def get_stat_today():
     return {
         "stat_total": total,
         "stat_close": near_5km,
-        "stat_rarest": rearest,
+        "stat_rarest": best_model,
         "stat_military_ghost": military_invisible > 0, # Zwraca True/False
         "stat_light": lekkie_5km
     }

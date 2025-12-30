@@ -197,7 +197,7 @@ def get_detailed_stats_today():
         WHERE last_seen > ? 
         AND model IS NOT NULL 
         AND model != '' 
-        AND model != 'Nieznany'
+        AND model != 'Nieznany model'
         AND model != 'None'
         AND TRIM(model) != ''
         GROUP BY model 
@@ -205,6 +205,31 @@ def get_detailed_stats_today():
         LIMIT 3
     """, (today_midnight,))
     top_models = c.fetchall()
+
+    #5. Top 5 najrzadszych samolotów
+    c.execute("""
+        SELECT model, COUNT(*) as cnt 
+        FROM historia 
+        WHERE last_seen > ? 
+        AND model IS NOT NULL 
+        AND model != '' 
+        AND model != 'Nieznany model'
+        AND model != 'None'
+        AND TRIM(model) != ''
+        GROUP BY model 
+        ORDER BY cnt ASC 
+    """, (today_midnight,))
+    all_models_rows = c.fetchall()
+
+    #Ocena rzadkości i przypisanie punktów
+    scored_models = []
+    for model, count in all_models_rows:
+        points = rarity_check(model)
+        scored_models.append((model, count, points))
+
+    #Sortowanie według punktów i liczby wystąpień
+    scored_models.sort(key=lambda x: (-x[2], -x[1]), reverse=True)
+    rare_models = [(model, count) for model, count, points in scored_models[:5]]
     conn.close()
 
     return {
@@ -212,7 +237,8 @@ def get_detailed_stats_today():
         "close": close_5km,
         "light": light_total,
         "ghost_model": ghost_info,
-        "top_models": top_models
+        "top_models": top_models,
+        "rare_models": rare_models
     }
 
 def get_flights_list():

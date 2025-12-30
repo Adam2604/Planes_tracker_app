@@ -123,12 +123,24 @@
         {% endif %}
     </div>
 
-    <div class="top-list">
+    <div class="top-list" style="margin-bottom: 20px;">
         <div class="label" style="margin-bottom: 15px;">🏆 Najpopularniejsze Modele</div>
         {% for model, count in s.top_models %}
             <div class="top-row">
                 <span class="top-name">{{ loop.index }}. {{ model }}</span>
                 <span class="top-count">{{ count }}x</span>
+            </div>
+        {% else %}
+            <div style="text-align: center; color: #666; padding: 10px;">Brak danych</div>
+        {% endfor %}
+    </div>
+
+    <div class="top-list">
+        <div class="label" style="margin-bottom: 15px;">💎 Unikaty (Najrzadziej widziane)</div>
+        {% for model, count in s.rare_models %}
+            <div class="top-row">
+                <span class="top-name">{{ loop.index }}. {{ model }}</span>
+                <span class="top-count" style="background: #FFC107; color: black;">{{ count }}x</span>
             </div>
         {% else %}
             <div style="text-align: center; color: #666; padding: 10px;">Brak danych</div>

@@ -237,7 +237,7 @@ def get_data():
     with planes_lock:
         return jsonify(list(planes.values()))
 
-@app.route('/stats')
+@app.route('/fast_stats')
 def get_stats():
     stats = data_base.get_stat_today()
     return jsonify(stats)
@@ -246,6 +246,11 @@ def get_stats():
 def list_page():
     flights = data_base.get_flights_list()
     return render_template('list.html', flights=flights)
+
+@app.route('/statystyki')
+def stats_page():
+    stats = data_base.get_detailed_stats_today()
+    return render_template('stats.html', s=stats)
 
 @app.route('/')
 def index():

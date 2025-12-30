@@ -92,7 +92,7 @@ def rarity_check(model_text):
     if any(x in text for x in vip): return 100
 
     #lista częstych samolotów -> 0 pkt
-    common = ["BOEING 737", "AIRBUS A320", "AIRBUS A321", "EMBRAER", "RYANAIR", "WIZZAIR", "CRJ", "ATR 72"]
+    common = ["BOEING", "AIRBUS A320", "AIRBUS A321", "EMBRAER", "RYANAIR", "WIZZ AIR", "CRJ", "ATR 72"]
     if any(x in text for x in common): return 0
 
     #reszta 10 pkt
@@ -157,6 +157,57 @@ def get_stat_today():
         "stat_rarest": best_model,
         "stat_military_ghost": military_invisible > 0, # Zwraca True/False
         "stat_light": lekkie_5km
+    }
+
+def get_detailed_stats_today():
+    #Zwraca szczegółowe statystyki do podstrony statystyk
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    today_midnight = datetime.combine(date.today(), datetime.min.time()).timestamp()
+    # 1. Podstawowe liczniki
+    c.execute("SELECT COUNT(*) FROM historia WHERE last_seen > ?", (today_midnight,))
+    total = c.fetchone()[0]
+    
+    c.execute("SELECT COUNT(*) FROM historia WHERE last_seen > ? AND min_dist <= 5.0", (today_midnight,))
+    close_5km = c.fetchone()[0]
+    
+    # 2. Samoloty lekkie (WSZYSTKIE dzisiaj, nie tylko bliskie)
+    c.execute("SELECT COUNT(*) FROM historia WHERE last_seen > ? AND category = 1", (today_midnight,))
+    light_total = c.fetchone()[0]
+    
+    # 3. Wojskowy Ghost - pobieramy NAZWĘ modelu
+    key_words = ['Military', 'Air Force', 'NATO', 'Army', 'Polish Air Force']
+    sql_like = " OR ".join([f"model LIKE '%{slowo}%'" for slowo in key_words])
+
+    c.execute(f"""
+        SELECT model FROM historia 
+        WHERE last_seen > ? 
+        AND has_location = 0 
+        AND ({sql_like})
+        LIMIT 1
+    """, (today_midnight,))
+
+    ghost_row = c.fetchone()
+    ghost_info = ghost_row[0] if ghost_row else None
+
+    #4. Top 3 najczęstszych modeli
+    c.execute("""
+        SELECT model, COUNT(*) as cnt 
+        FROM historia 
+        WHERE last_seen > ? AND model != 'Nieznany'
+        GROUP BY model 
+        ORDER BY cnt DESC 
+        LIMIT 3
+    """, (today_midnight,))
+    top_models = c.fetchall()
+    conn.close()
+
+    return {
+        "total": total,
+        "close": close_5km,
+        "light": light_total,
+        "ghost_model": ghost_info,
+        "top_models": top_models
     }
 
 def get_flights_list():

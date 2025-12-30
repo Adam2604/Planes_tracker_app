@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Szczegółowe Statystyki</title>
+    <style>
+        body { 
+            background-color: #1a1a1a; 
+            color: white; 
+            font-family: 'Segoe UI', sans-serif; 
+            margin: 0; 
+            padding: 20px;
+        }
+
+        .back-btn {
+            display: inline-block;
+            background: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            text-decoration: none;
+            border-radius: 25px;
+            font-weight: bold;
+            margin-bottom: 25px;
+        }
+
+        h1 { text-align: center; color: #ddd; margin-bottom: 30px; font-weight: 300; }
+
+        /* Siatka kafelków */
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            border: 1px solid #333;
+        }
+
+        .card-big { grid-column: span 2; }
+        
+        .number { font-size: 32px; font-weight: bold; color: #fff; margin: 10px 0; }
+        .label { font-size: 13px; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
+        
+        .c-green { color: #4CAF50; }
+        .c-blue { color: #2196F3; }
+        .c-orange { color: #FF9800; }
+        .c-red { color: #F44336; }
+
+        /* Sekcja Ghost */
+        .ghost-box {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            border: 1px solid #333;
+            text-align: center;
+        }
+        .ghost-alert {
+            color: #F44336;
+            font-weight: bold;
+            font-size: 18px;
+            animation: pulse 2s infinite;
+        }
+        
+        /* Sekcja Top 3 */
+        .top-list {
+            background: #2a2a2a;
+            border-radius: 15px;
+            padding: 15px;
+        }
+        .top-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #333;
+        }
+        .top-row:last-child { border-bottom: none; }
+        .top-name { font-weight: 600; color: #ddd; }
+        .top-count { background: #444; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.6; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <a href="/" class="back-btn">⬅ Mapa</a>
+
+    <h1>📊 Statystyki Dnia</h1>
+
+    <div class="grid-container">
+        <div class="card">
+            <div class="label">Wszystkie Loty</div>
+            <div class="number c-green">{{ s.total }}</div>
+        </div>
+        <div class="card">
+            <div class="label">Blisko (<5km)</div>
+            <div class="number c-blue">{{ s.close }}</div>
+        </div>
+        <div class="card">
+            <div class="label">Lekkie (Wszystkie)</div>
+            <div class="number c-orange">{{ s.light }}</div>
+        </div>
+    </div>
+
+    <div class="ghost-box">
+        <div class="label" style="margin-bottom: 10px;">👻 Wykrycie Wojskowe (Ghost)</div>
+        {% if s.ghost_model %}
+            <div class="ghost-alert">⚠️ WYKRYTO: {{ s.ghost_model }}</div>
+            <div style="font-size: 12px; color: #888; margin-top: 5px;">Brak pozycji GPS</div>
+        {% else %}
+            <div style="color: #4CAF50; font-weight: bold;">BRAK (Czysto)</div>
+        {% endif %}
+    </div>
+
+    <div class="top-list">
+        <div class="label" style="margin-bottom: 15px;">🏆 Najpopularniejsze Modele</div>
+        {% for model, count in s.top_models %}
+            <div class="top-row">
+                <span class="top-name">{{ loop.index }}. {{ model }}</span>
+                <span class="top-count">{{ count }}x</span>
+            </div>
+        {% else %}
+            <div style="text-align: center; color: #666; padding: 10px;">Brak danych</div>
+        {% endfor %}
+    </div>
+
+</body>
+</html>

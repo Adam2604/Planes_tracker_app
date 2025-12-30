@@ -194,7 +194,12 @@ def get_detailed_stats_today():
     c.execute("""
         SELECT model, COUNT(*) as cnt 
         FROM historia 
-        WHERE last_seen > ? AND model != 'Nieznany'
+        WHERE last_seen > ? 
+        AND model IS NOT NULL 
+        AND model != '' 
+        AND model != 'Nieznany'
+        AND model != 'None'
+        AND TRIM(model) != ''
         GROUP BY model 
         ORDER BY cnt DESC 
         LIMIT 3

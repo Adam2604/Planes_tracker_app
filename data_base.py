@@ -230,6 +230,19 @@ def get_detailed_stats_today():
     #Sortowanie według punktów i liczby wystąpień
     scored_models.sort(key=lambda x: (-x[2], -x[1]), reverse=True)
     rare_models = [(model, count) for model, count, points in scored_models[:5]]
+
+    #Najdalszy odebrany samolot
+    c.execute("""
+        SELECT model, min_dist
+        FROM historia
+        WHERE last_seen > ? 
+        AND min_dist < 9000  -- Odrzucamy 9999 (brak lokalizacji)
+        ORDER BY min_dist DESC
+        LIMIT 1
+    """, (today_midnight,))
+
+    farthest_row = c.fetchone()
+    farthest_data = {'model': farthest_row[0], 'dist': farthest_row[1]} if farthest_row else None
     conn.close()
 
     return {
@@ -238,7 +251,8 @@ def get_detailed_stats_today():
         "light": light_total,
         "ghost_model": ghost_info,
         "top_models": top_models,
-        "rare_models": rare_models
+        "rare_models": rare_models,
+        "farthest": farthest_data
     }
 
 def get_flights_list():

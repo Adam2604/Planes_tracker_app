@@ -58,6 +58,7 @@
         .c-blue { color: #2196F3; }
         .c-orange { color: #FF9800; }
         .c-red { color: #F44336; }
+        .c-purple { color: #9C27B0}
 
         /* Sekcja Ghost */
         .ghost-box {
@@ -114,8 +115,19 @@
             <div class="number c-blue">{{ s.close }}</div>
         </div>
         <div class="card">
-            <div class="label">Lekkie (Wszystkie)</div>
+            <div class="label">Lekkie samoloty</div>
             <div class="number c-orange">{{ s.light }}</div>
+        </div>
+        <div class="card">
+            <div class="label">Najdalszy samolot</div>
+            {% if s.farthest %}
+                <div class="number c-purple">{{ s.farthest.dist }} km</div>
+                <div style="font-size: 11px; color: #888; margin-top: -5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    {{ s.farthest.model if s.farthest.model else 'Nieznany' }}
+                </div>
+            {% else %}
+                <div class="number">-</div>
+            {% endif %}
         </div>
     </div>
 

@@ -12,13 +12,25 @@
             margin: 0; 
             padding: 20px;
         }
+        .controls {
+            background: #333; padding: 10px; border-radius: 15px;
+            margin-bottom: 20px; margin-top: 30px; display: flex; gap: 10px; align-items: center;
+            justify-content: center; flex-wrap: wrap; border: 1px solid #444;
+        }
+        input[type="date"], select {
+            background: #222; color: white; border: 1px solid #555;
+            padding: 8px; border-radius: 8px; font-size: 14px;
+        }
+        button.refresh-btn {
+            background: #2196F3; color: white; border: none;
+            padding: 8px 15px; border-radius: 8px; font-size: 14px; cursor: pointer;
+        }
 
         .back-btn {
             position: fixed;
             bottom: 30px;
             right: 20px;
             z-index: 9999;
-            
             background: #4CAF50;
             color: white;
             padding: 15px 25px;
@@ -30,9 +42,7 @@
             font-size: 16px;
         }
 
-        h1 { text-align: center; color: #ddd; margin-bottom: 30px; font-weight: 300; }
-
-        /* Siatka kafelków */
+        h1 { text-align: center; color: #ddd; margin-bottom: 30px; font-weight: 300; font-size: 24px; }
         .grid-container {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -49,15 +59,12 @@
             border: 1px solid #333;
         }
 
-        .card-big { grid-column: span 2; }
-        
         .number { font-size: 32px; font-weight: bold; color: #fff; margin: 10px 0; }
         .label { font-size: 13px; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
         
         .c-green { color: #4CAF50; }
         .c-blue { color: #2196F3; }
         .c-orange { color: #FF9800; }
-        .c-red { color: #F44336; }
         .c-purple { color: #9C27B0}
 
         /* Sekcja Ghost */
@@ -103,67 +110,98 @@
 
     <a href="/" class="back-btn">⬅ Mapa</a>
 
-    <h1>📊 Statystyki Dnia</h1>
+    <form class="controls" action="/statystyki" method="get">
+        <input type="date" name="date" value="{{ current_date }}" required>
+        <select name="mode">
+            <option value="day" {% if current_mode == 'day' %}selected{% endif %}>Dzień</option>
+            <option value="week" {% if current_mode == 'week' %}selected{% endif %}>Tydzień</option>
+        </select>
+        <button type="submit" class="refresh-btn">Pokaż</button>
+    </form>
 
-    <div class="grid-container">
-        <div class="card">
-            <div class="label">Wszystkie Loty</div>
-            <div class="number c-green">{{ s.total }}</div>
+    <h1>📊 
+        {% if current_mode == 'week' %}
+            Statystyki z tygodnia dla: {{ current_date }}
+        {% else %}
+            Statystyki z dnia: {{ current_date }}
+        {% endif %}
+    </h1>
+
+    {% if s %}
+
+        <div class="grid-container">
+            <div class="card">
+                <div class="label">Wszystkie Loty</div>
+                <div class="number c-green">{{ s.total }}</div>
+            </div>
+            <div class="card">
+                <div class="label">Blisko (<5km)</div>
+                <div class="number c-blue">{{ s.close }}</div>
+            </div>
+            <div class="card">
+                <div class="label">Lekkie samoloty</div>
+                <div class="number c-orange">{{ s.light }}</div>
+            </div>
+            <div class="card">
+                <div class="label">Najdalszy samolot</div>
+                {% if s.farthest %}
+                    <div class="number c-purple">{{ s.farthest.dist|round(1) }} km</div>
+                    <div style="font-size: 11px; color: #888; margin-top: -5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        {{ s.farthest.model if s.farthest.model else 'Nieznany' }}
+                    </div>
+                {% else %}
+                    <div class="number">-</div>
+                {% endif %}
+            </div>
         </div>
-        <div class="card">
-            <div class="label">Blisko (<5km)</div>
-            <div class="number c-blue">{{ s.close }}</div>
-        </div>
-        <div class="card">
-            <div class="label">Lekkie samoloty</div>
-            <div class="number c-orange">{{ s.light }}</div>
-        </div>
-        <div class="card">
-            <div class="label">Najdalszy samolot</div>
-            {% if s.farthest %}
-                <div class="number c-purple">{{ s.farthest.dist }} km</div>
-                <div style="font-size: 11px; color: #888; margin-top: -5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    {{ s.farthest.model if s.farthest.model else 'Nieznany' }}
-                </div>
+
+        <div class="ghost-box">
+            <div class="label" style="margin-bottom: 10px;">👻 Wykrycie Wojskowe (Ghost)</div>
+            {% if s.ghost_model %}
+                <div class="ghost-alert">⚠️ WYKRYTO: {{ s.ghost_model }}</div>
+                <div style="font-size: 12px; color: #888; margin-top: 5px;">Brak pozycji GPS</div>
             {% else %}
-                <div class="number">-</div>
+                <div style="color: #4CAF50; font-weight: bold;">BRAK (Czysto)</div>
             {% endif %}
         </div>
-    </div>
 
-    <div class="ghost-box">
-        <div class="label" style="margin-bottom: 10px;">👻 Wykrycie Wojskowe (Ghost)</div>
-        {% if s.ghost_model %}
-            <div class="ghost-alert">⚠️ WYKRYTO: {{ s.ghost_model }}</div>
-            <div style="font-size: 12px; color: #888; margin-top: 5px;">Brak pozycji GPS</div>
-        {% else %}
-            <div style="color: #4CAF50; font-weight: bold;">BRAK (Czysto)</div>
-        {% endif %}
-    </div>
+        <div class="top-list" style="margin-bottom: 20px;">
+            <div class="label" style="margin-bottom: 15px;">🏆 Najpopularniejsze Modele</div>
+            {% for model, count in s.top_models %}
+                <div class="top-row">
+                    <span class="top-name">{{ loop.index }}. {{ model }}</span>
+                    <span class="top-count">{{ count }}x</span>
+                </div>
+            {% else %}
+                <div style="text-align: center; color: #666; padding: 10px;">Brak danych</div>
+            {% endfor %}
+        </div>
 
-    <div class="top-list" style="margin-bottom: 20px;">
-        <div class="label" style="margin-bottom: 15px;">🏆 Najpopularniejsze Modele</div>
-        {% for model, count in s.top_models %}
-            <div class="top-row">
-                <span class="top-name">{{ loop.index }}. {{ model }}</span>
-                <span class="top-count">{{ count }}x</span>
-            </div>
-        {% else %}
-            <div style="text-align: center; color: #666; padding: 10px;">Brak danych</div>
-        {% endfor %}
-    </div>
+        <div class="top-list">
+            <div class="label" style="margin-bottom: 15px;">💎 Unikaty (Najrzadziej widziane)</div>
+            {% for model, count in s.rare_models %}
+                <div class="top-row">
+                    <span class="top-name">{{ loop.index }}. {{ model }}</span>
+                    <span class="top-count" style="background: #FFC107; color: black;">{{ count }}x</span>
+                </div>
+            {% else %}
+                <div style="text-align: center; color: #666; padding: 10px;">Brak danych</div>
+            {% endfor %}
+        </div>
 
-    <div class="top-list">
-        <div class="label" style="margin-bottom: 15px;">💎 Unikaty (Najrzadziej widziane)</div>
-        {% for model, count in s.rare_models %}
-            <div class="top-row">
-                <span class="top-name">{{ loop.index }}. {{ model }}</span>
-                <span class="top-count" style="background: #FFC107; color: black;">{{ count }}x</span>
-            </div>
-        {% else %}
-            <div style="text-align: center; color: #666; padding: 10px;">Brak danych</div>
-        {% endfor %}
-    </div>
+    {% else %}
+    
+        <div style="text-align: center; padding: 50px; background: #2a2a2a; border-radius: 15px; border: 1px solid #444; margin-top: 20px;">
+            <div style="font-size: 40px; margin-bottom: 10px;">📭</div>
+            <h3 style="margin: 0; color: #F44336; font-weight: 300;">Brak danych dla wybranej daty</h3>
+            <p style="color: #888; margin-top: 10px;">W tym dniu radar nie działał lub dane nie zostały jeszcze zarchiwizowane.</p>
+            
+            <a href="/statystyki" style="display: inline-block; margin-top: 20px; color: #2196F3; text-decoration: none; border: 1px solid #2196F3; padding: 10px 20px; border-radius: 8px;">
+                Wróć do dzisiaj
+            </a>
+        </div>
+
+    {% endif %}
 
 </body>
 </html>

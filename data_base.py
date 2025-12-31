@@ -1,30 +1,40 @@
 import sqlite3
 import time
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
+import json
+import os
 
-DB_NAME = "radar.db"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_NAME = os.path.join(BASE_DIR, "radar.db")
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS historia (
-                    icao TEXT,
-                    callsign TEXT,
-                    model TEXT,
-                    min_dist REAL,
-                    max_speed INTEGER,
-                    category INTEGER,
-                    has_location INTEGER,
-                    first_seen INTEGER,
-                    last_seen INTEGER
+                    icao TEXT, callsign TEXT, model TEXT, min_dist REAL,
+                    max_speed INTEGER, category INTEGER, has_location INTEGER,
+                    first_seen INTEGER, last_seen INTEGER
                 )''')
     c.execute("CREATE INDEX IF NOT EXISTS idx_icao_time ON historia (icao, last_seen)")
+    
+    # Tabela archiwum
+    c.execute('''CREATE TABLE IF NOT EXISTS daily_stats (
+                    day_date TEXT PRIMARY KEY,
+                    total_flights INTEGER,
+                    close_flights INTEGER,
+                    light_flights INTEGER,
+                    military_ghost_found INTEGER,
+                    farthest_dist REAL,
+                    farthest_model TEXT,
+                    rarest_model TEXT, 
+                    top_model TEXT
+                )''')
     conn.commit()
     conn.close()
 
 def save_flight(plane):
-    # Ignorujemy szumy (krótsze niż 10s)
-    if plane['last_seen'] - plane['first_seen'] < 10:
+    # Ignorujemy szumy (krótsze niż 5s)
+    if plane['last_seen'] - plane['first_seen'] < 5:
         return
 
     conn = sqlite3.connect(DB_NAME)
@@ -88,15 +98,159 @@ def rarity_check(model_text):
     text = model_text.upper()
 
     #lista "VIP" -> najrzadsze samoloty 100 pkt
-    vip = ["AIR FORCE", "MILITARY", "NATO", "NAVY", "POLICE", "LPR", "CESSNA", "PIPER", "ANTONOV", "ROBINSON"]
+    vip = ["AIR FORCE", "MILITARY", "NATO", "NAVY", "POLICE", "LPR", "ANTONOV", "ROBINSON"]
     if any(x in text for x in vip): return 100
-
+    #Lista rzadkich samolotów -> 50 pkt
+    rare = ["CESSNA", "PIPER", "TECNAM"]
+    if any(x in text for x in rare): return 50
     #lista częstych samolotów -> 0 pkt
     common = ["BOEING", "AIRBUS A320", "AIRBUS A321", "EMBRAER", "RYANAIR", "WIZZ AIR", "CRJ", "ATR 72"]
     if any(x in text for x in common): return 0
 
     #reszta 10 pkt
     return 10
+
+def archive_past_days():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    
+    today_str = date.today().strftime("%Y-%m-%d")
+    
+    c.execute("SELECT DISTINCT date(last_seen, 'unixepoch', 'localtime') as d FROM historia WHERE d != ?", (today_str,))
+    days_to_archive = [row[0] for row in c.fetchall()]
+    
+    for day_str in days_to_archive:
+        c.execute("SELECT 1 FROM daily_stats WHERE day_date = ?", (day_str,))
+        if c.fetchone(): continue 
+
+        print(f"Archiwizuję dzień: {day_str}...")
+        
+        day_start = datetime.strptime(day_str, "%Y-%m-%d").timestamp()
+        day_end = day_start + 86400
+        
+        # 1. Liczniki
+        c.execute("SELECT COUNT(*) FROM historia WHERE last_seen >= ? AND last_seen < ?", (day_start, day_end))
+        total = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM historia WHERE last_seen >= ? AND last_seen < ? AND min_dist <= 5.0", (day_start, day_end))
+        close = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM historia WHERE last_seen >= ? AND last_seen < ? AND category = 1", (day_start, day_end))
+        light = c.fetchone()[0]
+        
+        # 2. Ghost 
+        key_words = ['Military', 'Air Force', 'NATO', 'Army', 'Polish Air Force']
+        sql_like = " OR ".join([f"model LIKE '%{slowo}%'" for slowo in key_words])
+        c.execute(f"SELECT model FROM historia WHERE last_seen >= ? AND last_seen < ? AND has_location = 0 AND ({sql_like}) LIMIT 1", (day_start, day_end))
+        ghost_row = c.fetchone()
+        mil_ghost = ghost_row[0] if ghost_row else None 
+        
+        # 3. Najdalszy
+        c.execute("SELECT model, min_dist FROM historia WHERE last_seen >= ? AND last_seen < ? AND min_dist < 9000 ORDER BY min_dist DESC LIMIT 1", (day_start, day_end))
+        f_row = c.fetchone()
+        f_model = f_row[0] if f_row else ""
+        f_dist = f_row[1] if f_row else 0
+        
+        # 4. Najczęstsze 5
+        c.execute("""
+            SELECT model, COUNT(*) as cnt 
+            FROM historia 
+            WHERE last_seen >= ? AND last_seen < ? 
+            AND model IS NOT NULL AND model NOT LIKE 'Nieznany%' AND model != 'None' AND TRIM(model) != ''
+            GROUP BY model ORDER BY cnt DESC LIMIT 5
+        """, (day_start, day_end))
+        top_json = json.dumps(c.fetchall())
+
+        # 5. Najrzadsze 5
+        c.execute("""
+            SELECT model, COUNT(*) as cnt 
+            FROM historia 
+            WHERE last_seen >= ? AND last_seen < ? 
+            AND model IS NOT NULL AND model NOT LIKE 'Nieznany%' AND model != 'None' AND TRIM(model) != ''
+            GROUP BY model 
+        """, (day_start, day_end))
+        all_models = c.fetchall()
+        
+        scored = []
+        for m, count in all_models:
+            pts = rarity_check(m)
+            scored.append((m, count, pts))
+        scored.sort(key=lambda x: (x[2], -x[1]), reverse=True)
+        rare_json = json.dumps([(x[0], x[1]) for x in scored[:5]])
+
+        # Zapis do bazy
+        c.execute("INSERT INTO daily_stats VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                  (day_str, total, close, light, mil_ghost, f_dist, f_model, rare_json, top_json))
+        
+    conn.commit()
+    conn.close()
+
+def get_history_stats(date_str, mode='day'):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    
+    today_str = date.today().strftime("%Y-%m-%d")
+    if mode == 'day' and date_str == today_str:
+        conn.close()
+        return get_detailed_stats_today()
+
+    if mode == 'day':
+        c.execute("SELECT * FROM daily_stats WHERE day_date = ?", (date_str,))
+        row = c.fetchone()
+        conn.close()
+        if not row: return None
+        
+        try:
+            raw_top = json.loads(row[8]) if row[8] else []
+            raw_rare = json.loads(row[7]) if row[7] else []
+        except:
+            raw_top = []
+            raw_rare = []
+
+        top_list = [item for item in raw_top if item[0] and len(item[0].strip()) > 1]
+        rare_list = [item for item in raw_rare if item[0] and len(item[0].strip()) > 1]
+        ghost_val = row[4]
+        ghost_display = None
+        
+        if ghost_val:
+            if str(ghost_val) == "1": # Stare archiwum
+                ghost_display = "Wykryto (Szczegóły nieznane)"
+            else:
+                ghost_display = str(ghost_val) # Nowe archiwum (nazwa modelu)
+
+        return {
+            "total": row[1], "close": row[2], "light": row[3],
+            "farthest": {'dist': row[5], 'model': row[6]} if row[5] else None,
+            "ghost_model": ghost_display,
+            "top_models": top_list,
+            "rare_models": rare_list
+        }
+    
+    elif mode == 'week':
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        start_week = dt - timedelta(days=dt.weekday())
+        end_week = start_week + timedelta(days=6)
+        s_str = start_week.strftime("%Y-%m-%d")
+        e_str = end_week.strftime("%Y-%m-%d")
+        
+        c.execute("""
+            SELECT SUM(total_flights), SUM(close_flights), SUM(light_flights), 
+                   MAX(military_ghost_found), MAX(farthest_dist)
+            FROM daily_stats WHERE day_date >= ? AND day_date <= ?
+        """, (s_str, e_str))
+        res = c.fetchone()
+        conn.close()
+        
+        if not res or res[0] is None: return None
+        g_found = res[3]
+        g_text = None
+        if g_found:
+             g_text = "Wykryto w tym tyg." if str(g_found) == "1" else str(g_found)
+
+        return {
+            "total": res[0], "close": res[1], "light": res[2],
+            "farthest": {'dist': res[4], 'model': "Różne"} if res[4] else None,
+            "ghost_model": g_text,
+            "top_models": [], "rare_models": []
+        }
 
 def get_stat_today():
     #Zwraca statystyki od północy do teraz
@@ -202,7 +356,7 @@ def get_detailed_stats_today():
         AND TRIM(model) != ''
         GROUP BY model 
         ORDER BY cnt DESC 
-        LIMIT 3
+        LIMIT 5
     """, (today_midnight,))
     top_models = c.fetchall()
 
@@ -228,7 +382,7 @@ def get_detailed_stats_today():
         scored_models.append((model, count, points))
 
     #Sortowanie według punktów i liczby wystąpień
-    scored_models.sort(key=lambda x: (-x[2], -x[1]), reverse=True)
+    scored_models.sort(key=lambda x: (x[2], -x[1]), reverse=True)
     rare_models = [(model, count) for model, count, points in scored_models[:5]]
 
     #Najdalszy odebrany samolot

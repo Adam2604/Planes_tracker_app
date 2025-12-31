@@ -4,11 +4,12 @@ import pyModeS as pms #biblioteka do wyciągania danych samolotu
 import time
 import threading
 import math
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 import csv
 import data_base
 import os
 import sys
+from datetime import date
 
 #Moje współrzędne
 MY_LAT = 51.978
@@ -162,12 +163,13 @@ def cleaner():
                     del cpr_buffer[k]
 
 def watchdog():
+    global last_packet_time
     #Sprawdza czy program się nie zawiesił i w razie co go resetuje
     print("Watchdog uruchomiony.")
     while True:
         time.sleep(60) #sprawdzanie co minutę
-        if time.time() - last_packet_time > 7200: #brak pakietów przez 2 godziny
-            print("Brak sygnału przez 2 godziny, restart programu.")
+        if time.time() - last_packet_time > 3600: #brak pakietów przez godzinę
+            print("Brak sygnału przez godzinę, restart programu.")
             os.execv(sys.executable, ['python'] + sys.argv)
 
 def radio_loop():
@@ -237,7 +239,7 @@ def get_data():
     with planes_lock:
         return jsonify(list(planes.values()))
 
-@app.route('/fast_stats')
+@app.route('/stats')
 def get_stats():
     stats = data_base.get_stat_today()
     return jsonify(stats)
@@ -249,8 +251,11 @@ def list_page():
 
 @app.route('/statystyki')
 def stats_page():
-    stats = data_base.get_detailed_stats_today()
-    return render_template('stats.html', s=stats)
+    date_param = request.args.get('date', date.today().strftime("%Y-%m-%d"))
+    mode_param = request.args.get('mode', 'day')
+    stats = data_base.get_history_stats(date_param, mode_param)
+
+    return render_template('stats.html', s=stats, current_date=date_param, current_mode=mode_param)
 
 @app.route('/')
 def index():
@@ -259,6 +264,7 @@ def index():
 if __name__ == "__main__":
     load_csv_data()
     data_base.init_db()
+    data_base.archive_past_days()
     #uruchomienie wątków
     threading.Thread(target=radio_loop, daemon=True).start()
     threading.Thread(target=cleaner, daemon=True).start()

@@ -50,7 +50,7 @@
         }
 
         .nav-btn {
-            flex: 1; /* Przyciski zajmują równą szerokość */
+            flex: 1;
             text-decoration: none;
             color: white;
             padding: 12px 0;
@@ -112,7 +112,7 @@
     <div id="map"></div>
 
     <div class="bottom-nav">
-        <a href="/stats" class="nav-btn btn-stats">📊 Statystyki</a>
+        <a href="/statystyki" class="nav-btn btn-stats">📊 Statystyki</a>
         <a href="/list" class="nav-btn btn-list">📋 Lista</a>
     </div>
 
@@ -181,15 +181,35 @@
         async function updateStats() {
             try {
                 let response = await fetch('/stats');
+                
+                // Jeśli serwer nie odpowiada, rzuć błąd (zamiast milczeć)
+                if (!response.ok) {
+                    throw new Error("Serwer offline");
+                }
+
                 let s = await response.json();
-                document.getElementById('s-total').innerText = s.stat_total;
-                document.getElementById('s-close').innerText = s.stat_close;
-                document.getElementById('s-light').innerText = s.stat_light;
+
+                // 1. Podstawowe liczniki
+                document.getElementById('s-total').innerText = s.stat_total || "0";
+                document.getElementById('s-close').innerText = s.stat_close || "0";
+                
+                // 2. Obsługa Ducha (Ghost)
                 let milElem = document.getElementById('s-mil');
-                milElem.innerText = s.stat_military_ghost ? "TAK! ⚠️" : "NIE";
-                milElem.style.color = s.stat_military_ghost ? "red" : "white";
-                document.getElementById('s-rare').innerText = s.stat_rarest;
-            } catch (e) { console.error("Błąd statystyk", e); }
+                let isGhost = s.stat_military_ghost ? true : false;
+                milElem.innerText = isGhost ? "TAK! ⚠️" : "NIE";
+                milElem.style.color = isGhost ? "red" : "white";
+
+                // 3. NAJRZADSZY SAMOLOT (Naprawa pustego pola)
+                // Zapis s.stat_rarest || "..." oznacza: "Weź dane z serwera, 
+                // a jak są puste/null, to wpisz tekst po prawej".
+                let rareText = s.stat_rarest || "Analizuję niebo...";
+                document.getElementById('s-rare').innerText = rareText;
+
+            } catch (e) { 
+                console.error("Błąd połączenia", e);
+                // W razie awarii pokaż to na ekranie zamiast pustego pola
+                document.getElementById('s-rare').innerText = "Szukam sygnału...";
+            }
         }
 
         setInterval(updatePlanes, 1000);

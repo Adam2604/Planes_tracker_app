@@ -101,7 +101,7 @@ def rarity_check(model_text):
     vip = ["AIR FORCE", "MILITARY", "NATO", "NAVY", "POLICE", "LPR", "ANTONOV", "ROBINSON"]
     if any(x in text for x in vip): return 100
     #Lista rzadkich samolotów -> 50 pkt
-    rare = ["CESSNA", "PIPER", "TECNAM"]
+    rare = ["A380", "CESSNA", "PIPER", "TECNAM"]
     if any(x in text for x in rare): return 50
     #lista częstych samolotów -> 0 pkt
     common = ["BOEING", "AIRBUS A320", "AIRBUS A321", "EMBRAER", "RYANAIR", "WIZZ AIR", "CRJ", "ATR 72"]
@@ -236,20 +236,89 @@ def get_history_stats(date_str, mode='day'):
                    MAX(military_ghost_found), MAX(farthest_dist)
             FROM daily_stats WHERE day_date >= ? AND day_date <= ?
         """, (s_str, e_str))
-        res = c.fetchone()
+        c.execute("""
+            SELECT SUM(total_flights), SUM(close_flights), SUM(light_flights), MAX(farthest_dist)
+            FROM daily_stats WHERE day_date >= ? AND day_date <= ?
+        """, (s_str, e_str))
+        sums = c.fetchone()
+
+        if not sums or sums[0] is None:
+            conn.close()
+            return None
+        
+        c.execute("""
+            SELECT top_model, rarest_model, military_ghost_found, farthest_model, farthest_dist
+            FROM daily_stats WHERE day_date >= ? AND day_date <= ?
+        """, (s_str, e_str))
+        rows = c.fetchall()
         conn.close()
         
-        if not res or res[0] is None: return None
-        g_found = res[3]
-        g_text = None
-        if g_found:
-             g_text = "Wykryto w tym tyg." if str(g_found) == "1" else str(g_found)
+        weekly_top = {}
+        weekly_rare = {}
+        ghost_found = set()
+        max_dist_found = 0
+        max_dist_model = "Nieznany"
+        
+        for r in rows:
+            # r[0] = top_json, r[1] = rare_json, r[2] = ghost, r[3] = f_model, r[4] = f_dist
+            #1. Sumowanie top modeli
+            if r[0]:
+                try:
+                    day_list = json.loads(r[0])
+                    for model, count in day_list:
+                        if model and len(model.strip()) > 1:
+                            weekly_top[model] = weekly_top.get(model, 0) + count
+                except: pass
+
+            #2. Sumowanie rzadkich modeli
+            if r[1]:
+                try:
+                    day_list = json.loads(r[1])
+                    for model, count in day_list:
+                        if model and len(model.strip()) > 1:
+                            weekly_rare[model] = weekly_rare.get(model, 0) + count
+                except: pass
+
+            #3. Zbieranie nazw duchów
+            if r[2]:
+                val = str(r[2])
+                if val != "1" and val != "0":
+                    ghost_found.add(val)
+
+            #4. Najdalszy samolot
+            dist = r[4] if r[4] else 0
+            if dist > max_dist_found:
+                max_dist_found = dist
+                max_dist_model = r[3]
+            
+        #Sortowanie wyników tygodniowych
+        sorted_top = sorted(weekly_top.items(), key=lambda x: x[1], reverse=True)[:5]
+        scored_rare = []
+        for model, count in weekly_rare.items():
+            pts = rarity_check(model)
+            scored_rare.append((model, count, pts))
+
+        scored_rare.sort(key=lambda x: (x[2], -x[1]), reverse=True)
+        final_rare = [(x[0], x[1]) for x in scored_rare[:5]]
+
+        ghost_text = None
+        if ghost_found:
+            ghost_text = ", ".join(list(ghost_found)[:3])
+            if len(ghost_found) > 3:
+                ghost_text += ", ..."
+        elif sums[0] > 0 and not ghost_found:
+            for r in rows:
+                if r[2] == 1:
+                    ghost_text = "Wykryto (Szczegóły nieznane)"
+                    break
+
 
         return {
-            "total": res[0], "close": res[1], "light": res[2],
-            "farthest": {'dist': res[4], 'model': "Różne"} if res[4] else None,
-            "ghost_model": g_text,
-            "top_models": [], "rare_models": []
+            "total": sums[0], "close": sums[1], "light": sums[2],
+            "farthest": {'dist': max_dist_found, 'model': max_dist_model},
+            "ghost_model": ghost_text,
+            "top_models": sorted_top,
+            "rare_models": final_rare
         }
 
 def get_stat_today():

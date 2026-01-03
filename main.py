@@ -28,7 +28,9 @@ last_packet_time = time.time() #czas ostatniego pakietu do sprawdzania czy progr
 def load_csv_data():
     print("Ładowanie bazy samolotów...")
     try:
-        with open("samoloty.csv", mode='r', encoding = 'utf-8') as file:
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        file_path = os.path.join(BASE_DIR, 'samoloty.csv')
+        with open(file_path, mode='r', encoding = 'utf-8') as file:
             reader = csv.DictReader(file, quotechar="'")
             count = 0
             for row in reader:

@@ -9,7 +9,7 @@ import csv
 import data_base
 import os
 import sys
-from datetime import date
+from datetime import date, datetime
 
 #Moje współrzędne
 MY_LAT = 51.978
@@ -164,13 +164,27 @@ def cleaner():
 
 def watchdog():
     global last_packet_time
+    global last_archived_date
     #Sprawdza czy program się nie zawiesił i w razie co go resetuje
+    #Dodatkowo sprawdza czy nie minęła północ i archiwizuje dane
     print("Watchdog uruchomiony.")
     while True:
         time.sleep(60) #sprawdzanie co minutę
         if time.time() - last_packet_time > 3600: #brak pakietów przez godzinę
             print("Brak sygnału przez godzinę, restart programu.")
-            os.execv(sys.executable, ['python'] + sys.argv)
+            sys.exit(1)
+        
+        #Sprawdzanie czy minęła północ
+        current_date = date.today()
+        if current_date > last_archived_date:
+            print("Minęła północ, archiwizowanie danych.")
+            try:
+                data_base.archive_past_days()
+                last_archived_date = current_date
+                print("Archiwizacja zakończona.")
+            except Exception as e:
+                print(f"Błąd podczas archiwizacji: {e}")
+        
 
 def radio_loop():
     #Konfiguracja

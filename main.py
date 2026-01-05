@@ -91,12 +91,13 @@ def decode_details(hex_msg):
             pos = pms.adsb.position(even[0], odd[0], even[1], odd[1], MY_LAT, MY_LON)
             if pos:
                 dist = calculate_distance(MY_LAT, MY_LON, pos[0], pos[1])
-                print(f"Samolot znajduje się {dist:.1f} km ode mnie")
-                actualize_plane(icao,{
-                    "lat": pos[0],
-                    "lon": pos[1],
-                    "dist": round(dist, 1)
-                })
+                if dist < 600:
+                    print(f"Samolot znajduje się {dist:.1f} km ode mnie")
+                    actualize_plane(icao,{
+                        "lat": pos[0],
+                        "lon": pos[1],
+                        "dist": round(dist, 1)
+                    })
 
     #3. Prędkość i kurs
     elif tc == 19:

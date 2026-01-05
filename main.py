@@ -9,7 +9,7 @@ import csv
 import data_base
 import os
 import sys
-from datetime import date, datetime
+from datetime import date, timedelta
 
 #Moje współrzędne
 MY_LAT = 51.978
@@ -24,6 +24,7 @@ planes_data = {}
 app = Flask(__name__)
 
 last_packet_time = time.time() #czas ostatniego pakietu do sprawdzania czy program się nie zawiesił
+last_archived_date = date.today() - timedelta(days=1) #watchdog po starcie od razu sprawdza stan archiwum
 
 def load_csv_data():
     print("Ładowanie bazy samolotów...")

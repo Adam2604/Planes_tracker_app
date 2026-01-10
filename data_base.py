@@ -8,7 +8,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_NAME = os.path.join(BASE_DIR, "radar.db")
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout = 10)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS historia (
                     icao TEXT, callsign TEXT, model TEXT, min_dist REAL,
@@ -37,7 +37,7 @@ def save_flight(plane):
     if plane['last_seen'] - plane['first_seen'] < 5:
         return
 
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout = 10)
     c = conn.cursor()
     
     # Dane do zapisu
@@ -111,7 +111,7 @@ def rarity_check(model_text):
     return 10
 
 def archive_past_days():
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout = 10)
     c = conn.cursor()
     
     today_str = date.today().strftime("%Y-%m-%d")
@@ -184,7 +184,7 @@ def archive_past_days():
     conn.close()
 
 def get_history_stats(date_str, mode='day'):
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout = 10)
     c = conn.cursor()
     
     today_str = date.today().strftime("%Y-%m-%d")
@@ -323,7 +323,7 @@ def get_history_stats(date_str, mode='day'):
 
 def get_stat_today():
     #Zwraca statystyki od północy do teraz
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout = 10)
     c = conn.cursor()
     today_midnight = datetime.combine(date.today(), datetime.min.time()).timestamp()
     
@@ -384,7 +384,7 @@ def get_stat_today():
 
 def get_detailed_stats_today():
     #Zwraca szczegółowe statystyki do podstrony statystyk
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout = 10)
     c = conn.cursor()
     today_midnight = datetime.combine(date.today(), datetime.min.time()).timestamp()
     # 1. Podstawowe liczniki
@@ -480,7 +480,7 @@ def get_detailed_stats_today():
 
 def get_flights_list():
     #Pobiera listę lotów z dzisiaj do wyświetlenia w tabeli
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout = 10)
     c = conn.cursor()
     today_midnight = datetime.combine(date.today(), datetime.min.time()).timestamp()
     
@@ -510,7 +510,7 @@ def get_flights_list():
     return results
 
 def delete_old_data():
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout = 10)
     c = conn.cursor()
     limit = time.time() - (48 * 3600)
     c.execute("DELETE FROM historia WHERE last_seen < ?", (limit,))

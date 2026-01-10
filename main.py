@@ -180,6 +180,10 @@ def watchdog():
         
         #Sprawdzanie czy minęła północ
         current_date = date.today()
+
+        #logowanie diagnostyczne raz na godzinę aby sprawdzić czy watchdog działa
+        if time.localtime().tm_min == 0:
+            print(f"[{time.strftime('%H:%M')}] Watchdog działa. Dziś: {current_date}, Ostatnia archiwizacja: {last_archived_date}")
         if current_date > last_archived_date:
             print("Minęła północ, archiwizowanie danych.")
             try:
@@ -187,7 +191,7 @@ def watchdog():
                 last_archived_date = current_date
                 print("Archiwizacja zakończona.")
             except Exception as e:
-                print(f"Błąd podczas archiwizacji: {e}")
+                print(f"[{time.strftime('%H:%M:%S')}] BŁĄD podczas archiwizacji: {e}")
         
 
 def radio_loop():

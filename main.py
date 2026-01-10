@@ -10,6 +10,7 @@ import data_base
 import os
 import sys
 from datetime import date, timedelta
+import logging
 
 #Moje współrzędne
 MY_LAT = 51.978
@@ -22,6 +23,8 @@ planes_lock = threading.Lock() #zabezpieczenie przed konfiktem wątków
 planes_data = {}
 
 app = Flask(__name__)
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
 
 last_packet_time = time.time() #czas ostatniego pakietu do sprawdzania czy program się nie zawiesił
 last_archived_date = date.today() - timedelta(days=1) #watchdog po starcie od razu sprawdza stan archiwum

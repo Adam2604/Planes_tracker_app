@@ -25,7 +25,8 @@ The dashboard provides a real-time view of the airspace with features designed f
 * **Instant Metrics:** A HUD shows the total number of tracked flights and proximity alerts (< 5km) in real-time.
   
 #### Main page - Desktop view:
-<img width="1600" alt="image" src="https://github.com/user-attachments/assets/c535526c-3c57-496b-81b3-80303dba30d2" />
+<img width="1600" alt="image" src="https://github.com/user-attachments/assets/ede030d9-c904-4465-9ef0-074662fba272" />
+
 
 
 

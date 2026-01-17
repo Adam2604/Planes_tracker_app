@@ -276,8 +276,16 @@ def list_page():
 
 @app.route('/statystyki')
 def stats_page():
-    date_param = request.args.get('date', date.today().strftime("%Y-%m-%d"))
     mode_param = request.args.get('mode', 'day')
+    if mode_param == 'month':
+        default_date = date.today().strftime("%Y-%m")
+    else:
+        default_date = date.today().strftime("%Y-%m-%d")
+
+    date_param = request.args.get('date', default_date)
+
+    if mode_param == "month" and len(date_param) > 7:
+        date_param = date_param[:7]
     stats = data_base.get_history_stats(date_param, mode_param)
 
     return render_template('stats.html', s=stats, current_date=date_param, current_mode=mode_param)

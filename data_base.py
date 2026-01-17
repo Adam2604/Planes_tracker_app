@@ -3,6 +3,7 @@ import time
 from datetime import datetime, date, timedelta
 import json
 import os
+import calendar
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_NAME = os.path.join(BASE_DIR, "radar.db")
@@ -224,12 +225,28 @@ def get_history_stats(date_str, mode='day'):
             "rare_models": rare_list
         }
     
-    elif mode == 'week':
-        dt = datetime.strptime(date_str, "%Y-%m-%d")
-        start_week = dt - timedelta(days=dt.weekday())
-        end_week = start_week + timedelta(days=6)
-        s_str = start_week.strftime("%Y-%m-%d")
-        e_str = end_week.strftime("%Y-%m-%d")
+    elif mode == 'week' or mode == "month":
+        try:
+            if mode == "week":
+                dt = datetime.strptime(date_str, "%Y-%m-%d")
+                start_week = dt - timedelta(days=dt.weekday())
+                end_week = start_week + timedelta(days=6)
+                s_str = start_week.strftime("%Y-%m-%d")
+                e_str = end_week.strftime("%Y-%m-%d")
+            
+            elif mode == "month":
+                #Format daty: YYYY-MM
+                parts = date_str.split('-')
+                y = int(parts[0])
+                m = int(parts[1])
+
+                last_day = calendar.monthrange(y,m)[1]
+                s_str = f"{y}-{m:02d}-01"
+                e_str = f"{y}-{m:02d}-{last_day}"
+        except Exception as e:
+            print(f"Błąd daty {e}")
+            conn.close()
+            return None
         
         c.execute("""
             SELECT SUM(total_flights), SUM(close_flights), SUM(light_flights), 

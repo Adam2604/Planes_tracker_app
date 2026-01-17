@@ -17,7 +17,7 @@
             margin-bottom: 20px; margin-top: 30px; display: flex; gap: 10px; align-items: center;
             justify-content: center; flex-wrap: wrap; border: 1px solid #444;
         }
-        input[type="date"], select {
+        input[type="date"], input[type="month"], select {
             background: #222; color: white; border: 1px solid #555;
             padding: 8px; border-radius: 8px; font-size: 14px;
         }
@@ -111,17 +111,27 @@
     <a href="/" class="back-btn">⬅ Mapa</a>
 
     <form class="controls" action="/statystyki" method="get">
-        <input type="date" name="date" value="{{ current_date }}" required>
+        
+        {% if current_mode == 'month' %}
+            <input type="month" name="date" value="{{ current_date }}" required>
+        {% else %}
+            <input type="date" name="date" value="{{ current_date }}" required>
+        {% endif %}
+
         <select name="mode">
             <option value="day" {% if current_mode == 'day' %}selected{% endif %}>Dzień</option>
             <option value="week" {% if current_mode == 'week' %}selected{% endif %}>Tydzień</option>
+            <option value="month" {% if current_mode == 'month' %}selected{% endif %}>Miesiąc</option>
         </select>
+        
         <button type="submit" class="refresh-btn">Pokaż</button>
     </form>
 
     <h1>📊 
         {% if current_mode == 'week' %}
-            Statystyki z tygodnia dla: {{ current_date }}
+            Statystyki tygodniowe ({{ current_date }})
+        {% elif current_mode == 'month' %}
+            Statystyki miesięczne ({{ current_date }})
         {% else %}
             Statystyki z dnia: {{ current_date }}
         {% endif %}
@@ -194,7 +204,7 @@
         <div style="text-align: center; padding: 50px; background: #2a2a2a; border-radius: 15px; border: 1px solid #444; margin-top: 20px;">
             <div style="font-size: 40px; margin-bottom: 10px;">📭</div>
             <h3 style="margin: 0; color: #F44336; font-weight: 300;">Brak danych dla wybranej daty</h3>
-            <p style="color: #888; margin-top: 10px;">W tym dniu radar nie działał lub dane nie zostały jeszcze zarchiwizowane.</p>
+            <p style="color: #888; margin-top: 10px;">W tym okresie radar nie działał lub dane nie zostały jeszcze zarchiwizowane.</p>
             
             <a href="/statystyki" style="display: inline-block; margin-top: 20px; color: #2196F3; text-decoration: none; border: 1px solid #2196F3; padding: 10px 20px; border-radius: 8px;">
                 Wróć do dzisiaj

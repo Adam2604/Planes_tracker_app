@@ -1,7 +1,8 @@
 # ✈️ Custom ADS-B Radar & Flight Analyzer
 
 A custom-built, real-time aircraft tracking system capable of intercepting and decoding radio signals directly from the airspace. Unlike standard trackers, this project focuses on deep data analysis, historical archiving, and detecting "invisible" military traffic.
-You can check how it works on this page: planes-tracker.pl
+
+You can check how it works on this page: [Planes Tracker](https://planes-tracker.pl)
 
 ---
 

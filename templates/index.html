@@ -138,6 +138,8 @@
         L.marker([51.978, 17.498]).addTo(map).bindPopup("🏠 Baza (Jarocin)");
         L.circle([51.978, 17.498], {radius: 5000, color: '#4CAF50', fill: false, weight: 2}).addTo(map);
         var planesMarkers = {};
+        var selectedIcao = null;
+        var selectedRouteLine = null;
 
         function createPlaneIcon(heading, category) {
             let angle = heading || 0;
@@ -149,6 +151,56 @@
             });
         }
 
+        function clearSelectedRoute() {
+            if (selectedRouteLine) {
+                map.removeLayer(selectedRouteLine);
+                selectedRouteLine = null;
+            }
+            selectedIcao = null;
+        }
+
+        function hideSelectedRouteLine() {
+            if (selectedRouteLine) {
+                map.removeLayer(selectedRouteLine);
+                selectedRouteLine = null;
+            }
+        }
+
+        async function refreshSelectedRoute() {
+            if (!selectedIcao) return;
+
+            const requestedIcao = selectedIcao;
+            try {
+                let response = await fetch('/route/' + encodeURIComponent(requestedIcao));
+                if (!response.ok) throw new Error("Brak trasy");
+                let payload = await response.json();
+
+                if (selectedIcao !== requestedIcao) return;
+
+                if (!payload.active) {
+                    clearSelectedRoute();
+                    return;
+                }
+
+                if (!payload.route || payload.route.length < 2) {
+                    hideSelectedRouteLine();
+                    return;
+                }
+
+                if (selectedRouteLine) {
+                    selectedRouteLine.setLatLngs(payload.route);
+                } else {
+                    selectedRouteLine = L.polyline(payload.route, {
+                        color: '#FFFF00',
+                        weight: 3,
+                        opacity: 0.9
+                    }).addTo(map);
+                }
+            } catch (e) {
+                console.error("Błąd trasy", e);
+            }
+        }
+
         async function updatePlanes() {
             try {
                 let response = await fetch('/data');
@@ -156,6 +208,9 @@
                 let currentIcaos = planes.map(p => p.icao);
                 for (let icao in planesMarkers) {
                     if (!currentIcaos.includes(icao)) {
+                        if (selectedIcao === icao) {
+                            clearSelectedRoute();
+                        }
                         map.removeLayer(planesMarkers[icao]);
                         delete planesMarkers[icao];
                     }
@@ -171,10 +226,20 @@
                             marker.setIcon(icon);
                         } else {
                             let marker = L.marker([p.lat, p.lon], { icon: icon }).bindPopup(popupText).addTo(map);
+                            marker.on('click', function(e) {
+                                if (e && e.originalEvent) {
+                                    L.DomEvent.stopPropagation(e.originalEvent);
+                                }
+                                selectedIcao = p.icao;
+                                refreshSelectedRoute();
+                            });
                             planesMarkers[p.icao] = marker;
                         }
                     }
                 });
+                if (selectedIcao) {
+                    refreshSelectedRoute();
+                }
             } catch (e) { console.error("Błąd danych", e); }
         }
 
@@ -211,6 +276,10 @@
                 document.getElementById('s-rare').innerText = "Szukam sygnału...";
             }
         }
+
+        map.on('click', function() {
+            clearSelectedRoute();
+        });
 
         setInterval(updatePlanes, 1000);
         setInterval(updateStats, 5000);

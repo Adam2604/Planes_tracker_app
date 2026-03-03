@@ -141,10 +141,14 @@ def actualize_plane(icao, dane):
                 "min_dist": 9999,
                 "speed": 0,
                 "max_speed": 0,
-                "category": 0
+                "category": 0,
+                "route": []
             }
         planes[icao].update(dane)
         planes[icao]["last_seen"] = time.time()
+
+        if "lat" in dane and "lon" in dane:
+            planes[icao]["route"].append([dane["lat"], dane["lon"]])
 
         if "dist" in dane:
             if dane["dist"] < planes[icao]["min_dist"]:
@@ -262,7 +266,21 @@ def radio_loop():
 @app.route('/data')
 def get_data():
     with planes_lock:
-        return jsonify(list(planes.values()))
+        planes_for_map = []
+        for plane in planes.values():
+            map_plane = {k: v for k, v in plane.items() if k != "route"}
+            planes_for_map.append(map_plane)
+        return jsonify(planes_for_map)
+
+@app.route('/route/<icao>')
+def get_route(icao):
+    normalized_icao = icao.upper()
+    with planes_lock:
+        plane = planes.get(normalized_icao)
+        if not plane:
+            return jsonify({"icao": normalized_icao, "active": False, "route": []})
+        route = plane.get("route", [])
+        return jsonify({"icao": normalized_icao, "active": True, "route": route})
 
 @app.route('/stats')
 def get_stats():

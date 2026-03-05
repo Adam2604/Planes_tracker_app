@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="pl">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,31 +8,38 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        body { 
-            background-color: #1a1a1a; 
-            color: white; 
-            font-family: 'Segoe UI', sans-serif; 
-            margin: 0; 
+        body {
+            background-color: #1a1a1a;
+            color: white;
+            font-family: 'Segoe UI', sans-serif;
+            margin: 0;
             padding: 20px;
         }
+
         .back-btn {
             position: fixed;
             bottom: 30px;
             right: 20px;
             z-index: 9999;
-            
+
             background: #4CAF50;
             color: white;
             padding: 15px 25px;
             text-decoration: none;
             border-radius: 50px;
             font-weight: bold;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5); 
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
             margin: 0;
             font-size: 16px;
         }
 
-        h1 { text-align: center; color: #ddd; font-size: 22px; margin-bottom: 20px;}
+        h1 {
+            text-align: center;
+            color: #ddd;
+            font-size: 22px;
+            margin-bottom: 20px;
+        }
+
         .flight-table {
             width: 100%;
             border-collapse: collapse;
@@ -55,8 +63,13 @@
             border-bottom: 1px solid #444;
         }
 
-        tr:last-child td { border-bottom: none; }
-        tr:nth-child(even) { background-color: #303030; }
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:nth-child(even) {
+            background-color: #303030;
+        }
 
         .icao-tag {
             background: #444;
@@ -66,10 +79,12 @@
             font-weight: bold;
             color: #ccc;
         }
+
         .dist-tag {
             font-weight: bold;
             color: #4CAF50;
         }
+
         .route-btn {
             background: #FF9800;
             border: none;
@@ -80,37 +95,54 @@
             font-size: 16px;
             transition: background 0.2s, transform 0.1s;
         }
-        .route-btn:hover { background: #F57C00; }
-        .route-btn:active { transform: scale(0.95); }
-        .route-btn.active { background: #4CAF50; }
+
+        .route-btn:hover {
+            background: #F57C00;
+        }
+
+        .route-btn:active {
+            transform: scale(0.95);
+        }
+
+        .route-btn.active {
+            background: #4CAF50;
+        }
 
         /* Modal mapy */
         #map-overlay {
             display: none;
             position: fixed;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            background: rgba(0,0,0,0.85);
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
             z-index: 10000;
             flex-direction: column;
             align-items: center;
             justify-content: center;
         }
-        #map-overlay.visible { display: flex; }
+
+        #map-overlay.visible {
+            display: flex;
+        }
+
         #map-container {
             width: 90%;
             max-width: 800px;
             height: 70vh;
             border-radius: 12px;
             overflow: hidden;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.7);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7);
         }
+
         #map-title {
             color: white;
             font-size: 18px;
             font-weight: bold;
             margin-bottom: 12px;
         }
+
         #map-close {
             margin-top: 15px;
             background: #f44336;
@@ -123,9 +155,13 @@
             cursor: pointer;
             transition: background 0.2s;
         }
-        #map-close:hover { background: #d32f2f; }
+
+        #map-close:hover {
+            background: #d32f2f;
+        }
     </style>
 </head>
+
 <body>
 
     <a href="/" class="back-btn">⬅ Mapa</a>
@@ -152,17 +188,18 @@
                 <td>
                     <span class="dist-tag">
                         {% if f.dist >= 9999 %}
-                            -
+                        -
                         {% else %}
-                            {{ f.dist }} km
+                        {{ f.dist }} km
                         {% endif %}
                     </span>
                 </td>
                 <td>
                     {% if f.has_route %}
-                        <button class="route-btn" onclick="showRoute({{ f.rowid }}, '{{ f.icao }}', '{{ f.model }}')">🗺️</button>
+                    <button class="route-btn"
+                        onclick="showRoute({{ f.rowid }}, '{{ f.icao }}', '{{ f.model }}')">🗺️</button>
                     {% else %}
-                        <span style="color: #555;">—</span>
+                    <span style="color: #555;">—</span>
                     {% endif %}
                 </td>
             </tr>
@@ -171,9 +208,9 @@
     </table>
 
     {% if flights|length == 0 %}
-        <div style="text-align: center; margin-top: 50px; color: #666;">
-            Brak zarejestrowanych lotów dzisiaj.
-        </div>
+    <div style="text-align: center; margin-top: 50px; color: #666;">
+        Brak zarejestrowanych lotów dzisiaj.
+    </div>
     {% endif %}
 
     <!-- Modal z mapą trasy -->
@@ -196,8 +233,8 @@
             // Inicjalizacja mapy (jeśli pierwsza)
             if (!routeMap) {
                 routeMap = L.map('map-container', { zoomControl: true }).setView([51.978, 17.498], 9);
-                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                    attribution: '&copy; Carto', maxZoom: 20
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; OpenStreetMap', maxZoom: 19
                 }).addTo(routeMap);
             }
 
@@ -209,20 +246,20 @@
 
             // Pobranie trasy z serwera
             fetch('/route/history/' + rowid)
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
                     if (data.route && data.route.length >= 2) {
                         routeLine = L.polyline(data.route, {
-                            color: '#FFFF00',
+                            color: '#FF0000',
                             weight: 3,
                             opacity: 0.9
                         }).addTo(routeMap);
                         routeMap.fitBounds(routeLine.getBounds(), { padding: [30, 30] });
                     }
                     // Wymuszenie przerysowania mapy (fix dla modala)
-                    setTimeout(function() { routeMap.invalidateSize(); }, 100);
+                    setTimeout(function () { routeMap.invalidateSize(); }, 100);
                 })
-                .catch(function(e) { console.error('Błąd trasy', e); });
+                .catch(function (e) { console.error('Błąd trasy', e); });
         }
 
         function closeMap() {
@@ -230,10 +267,11 @@
         }
 
         // Zamknięcie mapy klawiszem ESC
-        document.addEventListener('keydown', function(e) {
+        document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') closeMap();
         });
     </script>
 
 </body>
+
 </html>

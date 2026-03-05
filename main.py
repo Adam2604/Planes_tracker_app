@@ -9,7 +9,7 @@ import csv
 import data_base
 import os
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import logging
 
 #Moje współrzędne
@@ -277,10 +277,33 @@ def get_route(icao):
     normalized_icao = icao.upper()
     with planes_lock:
         plane = planes.get(normalized_icao)
-        if not plane:
-            return jsonify({"icao": normalized_icao, "active": False, "route": []})
-        route = plane.get("route", [])
-        return jsonify({"icao": normalized_icao, "active": True, "route": route})
+        if plane:
+            route = plane.get("route", [])
+            return jsonify({"icao": normalized_icao, "active": True, "route": route})
+
+    # Fallback — samolot nie jest aktywny, szukaj trasy w bazie danych
+    import sqlite3 as _sqlite3
+    import json as _json
+    conn = _sqlite3.connect(data_base.DB_NAME, timeout=10)
+    c = conn.cursor()
+    today_midnight = datetime.combine(date.today(), datetime.min.time()).timestamp()
+    c.execute("SELECT route FROM historia WHERE icao = ? AND last_seen > ? ORDER BY last_seen DESC LIMIT 1", (normalized_icao, today_midnight))
+    row = c.fetchone()
+    conn.close()
+    if row and row[0]:
+        try:
+            db_route = _json.loads(row[0])
+        except:
+            db_route = []
+        return jsonify({"icao": normalized_icao, "active": False, "route": db_route})
+    return jsonify({"icao": normalized_icao, "active": False, "route": []})
+
+@app.route('/route/history/<int:rowid>')
+def get_route_history(rowid):
+    icao, route = data_base.get_flight_route(rowid)
+    if not icao:
+        return jsonify({"icao": None, "route": []})
+    return jsonify({"icao": icao, "route": route})
 
 @app.route('/stats')
 def get_stats():

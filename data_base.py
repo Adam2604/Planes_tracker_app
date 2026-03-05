@@ -14,8 +14,14 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS historia (
                     icao TEXT, callsign TEXT, model TEXT, min_dist REAL,
                     max_speed INTEGER, category INTEGER, has_location INTEGER,
-                    first_seen INTEGER, last_seen INTEGER
+                    first_seen INTEGER, last_seen INTEGER,
+                    route TEXT
                 )''')
+    # Migracja — dodanie kolumny route jeśli nie istnieje (dla istniejących baz)
+    try:
+        c.execute("ALTER TABLE historia ADD COLUMN route TEXT")
+    except sqlite3.OperationalError:
+        pass  # Kolumna już istnieje
     c.execute("CREATE INDEX IF NOT EXISTS idx_icao_time ON historia (icao, last_seen)")
     
     # Tabela archiwum
@@ -47,11 +53,13 @@ def save_flight(plane):
     current_speed = plane.get('speed', 0)
     current_max_speed = plane.get('max_speed', current_speed) 
     current_last_seen = int(plane['last_seen'])
+    current_route = plane.get('route', [])
+    route_json = json.dumps(current_route) if current_route else None
     
     today_midnight = datetime.combine(date.today(), datetime.min.time()).timestamp()
 
     # Sprawdzamy, czy ten samolot już był dzisiaj w bazie
-    c.execute("""SELECT rowid, min_dist, max_speed, first_seen, has_location 
+    c.execute("""SELECT rowid, min_dist, max_speed, first_seen, has_location, route 
                  FROM historia 
                  WHERE icao = ? AND last_seen > ?""", (icao, today_midnight))
     
@@ -59,27 +67,38 @@ def save_flight(plane):
 
     if existing_row:
         # Samolot już był dzisiaj. Scalamy dane.
-        row_id, old_dist, old_speed, old_first, old_has_loc = existing_row
+        row_id, old_dist, old_speed, old_first, old_has_loc, old_route_json = existing_row
         
         # Wybieramy najlepsze wartości z obu przelotów
         new_best_dist = min(old_dist, current_min_dist)
         new_best_speed = max(old_speed, current_max_speed)
         new_has_loc = 1 if new_best_dist != 9999 else 0
+
+        # Scalanie tras — stara trasa + nowa trasa
+        merged_route = []
+        if old_route_json:
+            try:
+                merged_route = json.loads(old_route_json)
+            except:
+                merged_route = []
+        merged_route.extend(current_route)
+        merged_route_json = json.dumps(merged_route) if merged_route else None
         
         # Aktualizujemy rekord
         c.execute("""UPDATE historia SET 
                      last_seen = ?, 
                      min_dist = ?, 
                      max_speed = ?,
-                     has_location = ?
+                     has_location = ?,
+                     route = ?
                      WHERE rowid = ?""", 
-                     (current_last_seen, new_best_dist, new_best_speed, new_has_loc, row_id))
+                     (current_last_seen, new_best_dist, new_best_speed, new_has_loc, merged_route_json, row_id))
 
     else:
         # NOWY WPIS
         has_loc = 1 if current_min_dist != 9999 else 0
         
-        c.execute("INSERT INTO historia VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (
+        c.execute("INSERT INTO historia VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
             icao,
             plane.get('callsign', 'N/A'),
             plane.get('model', 'Nieznany'),
@@ -88,7 +107,8 @@ def save_flight(plane):
             plane.get('category', 0),
             has_loc,
             int(plane['first_seen']),
-            current_last_seen
+            current_last_seen,
+            route_json
         ))
 
     conn.commit()
@@ -502,7 +522,7 @@ def get_flights_list():
     today_midnight = datetime.combine(date.today(), datetime.min.time()).timestamp()
     
     c.execute("""
-        SELECT icao, model, last_seen, min_dist, max_speed 
+        SELECT rowid, icao, model, last_seen, min_dist, max_speed, route 
         FROM historia 
         WHERE last_seen > ? 
         ORDER BY last_seen DESC
@@ -514,17 +534,35 @@ def get_flights_list():
     results = []
     for row in rows:
         # Konwersja znacznika czasu na godzinę (np. "15:43")
-        time_str = datetime.fromtimestamp(row[2]).strftime('%H:%M')
+        time_str = datetime.fromtimestamp(row[3]).strftime('%H:%M')
+        has_route = bool(row[6] and row[6] != '[]' and row[6] != 'null')
         
         results.append({
-            "icao": row[0],
-            "model": row[1],
+            "rowid": row[0],
+            "icao": row[1],
+            "model": row[2],
             "time": time_str,
-            "dist": round(row[3], 1),
-            "speed": row[4]
+            "dist": round(row[4], 1),
+            "speed": row[5],
+            "has_route": has_route
         })
         
     return results
+
+def get_flight_route(rowid):
+    """Pobiera trasę lotu z bazy danych po rowid"""
+    conn = sqlite3.connect(DB_NAME, timeout = 10)
+    c = conn.cursor()
+    c.execute("SELECT icao, route FROM historia WHERE rowid = ?", (rowid,))
+    row = c.fetchone()
+    conn.close()
+    if not row or not row[1]:
+        return None, []
+    try:
+        route = json.loads(row[1])
+    except:
+        route = []
+    return row[0], route
 
 def delete_old_data():
     conn = sqlite3.connect(DB_NAME, timeout = 10)

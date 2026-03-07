@@ -74,13 +74,15 @@ def save_flight(plane):
         new_best_speed = max(old_speed, current_max_speed)
         new_has_loc = 1 if new_best_dist != 9999 else 0
 
-        # Scalanie tras — stara trasa + nowa trasa
+        # Scalanie tras — stara trasa + separator null + nowa trasa
         merged_route = []
         if old_route_json:
             try:
                 merged_route = json.loads(old_route_json)
             except:
                 merged_route = []
+        if merged_route and current_route:
+            merged_route.append(None)  # separator — przerwa w linii na mapie
         merged_route.extend(current_route)
         merged_route_json = json.dumps(merged_route) if merged_route else None
         

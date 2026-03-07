@@ -296,7 +296,7 @@
 
     <script>
         var routeMap = null;
-        var routeLine = null;
+        var routeLayers = [];
         var activeBtn = null;
 
         function showRoute(rowid, icao, model) {
@@ -312,23 +312,46 @@
                 }).addTo(routeMap);
             }
 
-            // Usunięcie starej trasy
-            if (routeLine) {
-                routeMap.removeLayer(routeLine);
-                routeLine = null;
-            }
+            // Usunięcie starych tras
+            routeLayers.forEach(function (layer) { routeMap.removeLayer(layer); });
+            routeLayers = [];
 
             // Pobranie trasy z serwera
             fetch('/route/history/' + rowid)
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     if (data.route && data.route.length >= 2) {
-                        routeLine = L.polyline(data.route, {
-                            color: '#FF0000',
-                            weight: 3,
-                            opacity: 0.9
-                        }).addTo(routeMap);
-                        routeMap.fitBounds(routeLine.getBounds(), { padding: [30, 30] });
+                        // Podział trasy na segmenty w miejscach null
+                        var segments = [];
+                        var current = [];
+                        for (var i = 0; i < data.route.length; i++) {
+                            if (data.route[i] === null) {
+                                if (current.length >= 2) segments.push(current);
+                                current = [];
+                            } else {
+                                current.push(data.route[i]);
+                            }
+                        }
+                        if (current.length >= 2) segments.push(current);
+
+                        var allBounds = [];
+                        segments.forEach(function (seg) {
+                            var line = L.polyline(seg, {
+                                color: '#FF0000',
+                                weight: 3,
+                                opacity: 0.9
+                            }).addTo(routeMap);
+                            routeLayers.push(line);
+                            allBounds.push(line.getBounds());
+                        });
+
+                        if (allBounds.length > 0) {
+                            var combined = allBounds[0];
+                            for (var j = 1; j < allBounds.length; j++) {
+                                combined.extend(allBounds[j]);
+                            }
+                            routeMap.fitBounds(combined, { padding: [30, 30] });
+                        }
                     }
                     // Wymuszenie przerysowania mapy (fix dla modala)
                     setTimeout(function () { routeMap.invalidateSize(); }, 100);

@@ -90,17 +90,34 @@ def decode_details(hex_msg):
         cpr_buffer[icao][oe] = (hex_msg, now)
 
         even, odd = cpr_buffer[icao]
-        if even and odd and abs(even[1] - odd[1]) < 10:
+        if even and odd and abs(even[1] - odd[1]) < 3:
             pos = pms.adsb.position(even[0], odd[0], even[1], odd[1], MY_LAT, MY_LON)
             if pos:
                 dist = calculate_distance(MY_LAT, MY_LON, pos[0], pos[1])
                 if dist < 600:
-                    print(f"Samolot znajduje się {dist:.1f} km ode mnie")
-                    actualize_plane(icao,{
-                        "lat": pos[0],
-                        "lon": pos[1],
-                        "dist": round(dist, 1)
-                    })
+                    # Filtrowanie skoków pozycji
+                    accept = True
+                    with planes_lock:
+                        if icao in planes and "lat" in planes[icao] and "lon" in planes[icao]:
+                            prev_lat = planes[icao]["lat"]
+                            prev_lon = planes[icao]["lon"]
+                            prev_time = planes[icao].get("last_pos_time", 0)
+                            jump = calculate_distance(prev_lat, prev_lon, pos[0], pos[1])
+                            dt = now - prev_time if prev_time else 30
+                            # Max ~1200 km/h = 0.333 km/s, z marginesem
+                            max_dist = max(0.5 * dt, 5)  # min 5 km tolerancji
+                            if jump > max_dist:
+                                accept = False
+                                print(f"Odrzucono skok pozycji {jump:.1f} km (max {max_dist:.1f} km) dla {icao}")
+
+                    if accept:
+                        print(f"Samolot znajduje się {dist:.1f} km ode mnie")
+                        actualize_plane(icao,{
+                            "lat": pos[0],
+                            "lon": pos[1],
+                            "dist": round(dist, 1),
+                            "last_pos_time": now
+                        })
 
     #3. Prędkość i kurs
     elif tc == 19:

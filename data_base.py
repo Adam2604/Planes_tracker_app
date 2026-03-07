@@ -515,26 +515,45 @@ def get_detailed_stats_today():
         "farthest": farthest_data
     }
 
-def get_flights_list():
-    #Pobiera listę lotów z dzisiaj do wyświetlenia w tabeli
+def get_flights_list(date_from=None, date_to=None):
+    #Pobiera listę lotów z podanego zakresu dat do wyświetlenia w tabeli
     conn = sqlite3.connect(DB_NAME, timeout = 10)
     c = conn.cursor()
-    today_midnight = datetime.combine(date.today(), datetime.min.time()).timestamp()
+
+    # Domyślnie: dzisiejszy dzień
+    if not date_from:
+        date_from = date.today().strftime("%Y-%m-%d")
+    if not date_to:
+        date_to = date_from
+
+    try:
+        start_ts = datetime.strptime(date_from, "%Y-%m-%d").timestamp()
+        end_dt = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
+        end_ts = end_dt.timestamp()
+    except ValueError:
+        # Fallback na dzisiaj przy błędnym formacie
+        start_ts = datetime.combine(date.today(), datetime.min.time()).timestamp()
+        end_ts = start_ts + 86400
+
+    multi_day = (date_from != date_to)
     
     c.execute("""
         SELECT rowid, icao, model, last_seen, min_dist, max_speed, route 
         FROM historia 
-        WHERE last_seen > ? 
+        WHERE last_seen >= ? AND last_seen < ?
         ORDER BY last_seen DESC
-    """, (today_midnight,))
+    """, (start_ts, end_ts))
     
     rows = c.fetchall()
     conn.close()
     
     results = []
     for row in rows:
-        # Konwersja znacznika czasu na godzinę (np. "15:43")
-        time_str = datetime.fromtimestamp(row[3]).strftime('%H:%M')
+        # Pokaż datę + godzinę gdy zakres > 1 dzień, w przeciwnym razie tylko godzinę
+        if multi_day:
+            time_str = datetime.fromtimestamp(row[3]).strftime('%d.%m %H:%M')
+        else:
+            time_str = datetime.fromtimestamp(row[3]).strftime('%H:%M')
         has_route = bool(row[6] and row[6] != '[]' and row[6] != 'null')
         
         results.append({

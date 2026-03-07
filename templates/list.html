@@ -40,6 +40,66 @@
             margin-bottom: 20px;
         }
 
+        .filter-bar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 24px;
+            background: #2a2a2a;
+            padding: 14px 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .filter-bar label {
+            color: #aaa;
+            font-size: 14px;
+        }
+
+        .filter-bar input[type="date"] {
+            background: #333;
+            border: 1px solid #555;
+            color: #eee;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'Segoe UI', sans-serif;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+
+        .filter-bar input[type="date"]:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+
+        .filter-bar input[type="date"]::-webkit-calendar-picker-indicator {
+            filter: invert(0.7);
+            cursor: pointer;
+        }
+
+        .filter-btn {
+            background: #4CAF50;
+            border: none;
+            color: white;
+            padding: 8px 22px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+        }
+
+        .filter-btn:hover {
+            background: #43A047;
+        }
+
+        .filter-btn:active {
+            transform: scale(0.96);
+        }
+
         .flight-table {
             width: 100%;
             border-collapse: collapse;
@@ -166,12 +226,26 @@
 
     <a href="/" class="back-btn">⬅ Mapa</a>
 
-    <h1>✈️ Dzisiejsze przeloty</h1>
+    <h1>✈️
+        {% if date_from == date_to %}
+        Przeloty z dnia {{ date_from }}
+        {% else %}
+        Przeloty od {{ date_from }} do {{ date_to }}
+        {% endif %}
+    </h1>
+
+    <form class="filter-bar" method="GET" action="/list">
+        <label for="date_from">Od:</label>
+        <input type="date" id="date_from" name="date_from" value="{{ date_from }}">
+        <label for="date_to">Do:</label>
+        <input type="date" id="date_to" name="date_to" value="{{ date_to }}">
+        <button type="submit" class="filter-btn">🔍 Filtruj</button>
+    </form>
 
     <table class="flight-table">
         <thead>
             <tr>
-                <th>Godz.</th>
+                <th>{% if date_from != date_to %}Data / Godz.{% else %}Godz.{% endif %}</th>
                 <th>Samolot</th>
                 <th>Dystans</th>
                 <th>Trasa</th>
@@ -209,7 +283,7 @@
 
     {% if flights|length == 0 %}
     <div style="text-align: center; margin-top: 50px; color: #666;">
-        Brak zarejestrowanych lotów dzisiaj.
+        Brak zarejestrowanych lotów w wybranym zakresie dat.
     </div>
     {% endif %}
 

@@ -312,8 +312,10 @@ def get_stats():
 
 @app.route('/list')
 def list_page():
-    flights = data_base.get_flights_list()
-    return render_template('list.html', flights=flights)
+    date_from = request.args.get('date_from', date.today().strftime('%Y-%m-%d'))
+    date_to = request.args.get('date_to', date_from)
+    flights = data_base.get_flights_list(date_from, date_to)
+    return render_template('list.html', flights=flights, date_from=date_from, date_to=date_to)
 
 @app.route('/statystyki')
 def stats_page():

@@ -90,7 +90,7 @@ def decode_details(hex_msg):
         cpr_buffer[icao][oe] = (hex_msg, now)
 
         even, odd = cpr_buffer[icao]
-        if even and odd and abs(even[1] - odd[1]) < 3:
+        if even and odd and abs(even[1] - odd[1]) < 1.5:
             pos = pms.adsb.position(even[0], odd[0], even[1], odd[1], MY_LAT, MY_LON)
             if pos:
                 dist = calculate_distance(MY_LAT, MY_LON, pos[0], pos[1])
@@ -103,12 +103,36 @@ def decode_details(hex_msg):
                             prev_lon = planes[icao]["lon"]
                             prev_time = planes[icao].get("last_pos_time", 0)
                             jump = calculate_distance(prev_lat, prev_lon, pos[0], pos[1])
-                            dt = now - prev_time if prev_time else 30
-                            # Max ~1200 km/h = 0.333 km/s, z marginesem
-                            max_dist = max(0.5 * dt, 5)  # min 5 km tolerancji
+                            dt = now - prev_time if prev_time else 10
+
+                            # Filtr 1: Max prędkość ~1200 km/h = 0.333 km/s
+                            max_dist = max(0.4 * dt, 2)  # min 2 km tolerancji (zmniejszone z 5)
                             if jump > max_dist:
                                 accept = False
                                 print(f"Odrzucono skok pozycji {jump:.1f} km (max {max_dist:.1f} km) dla {icao}")
+
+                            # Filtr 2: Sprawdzenie zgodności kierunku lotu
+                            # Lustrzane pozycje CPR powodują nagłe zmiany kierunku
+                            # — samolot "skacze" w bok, co daje kąt ~90° do kursu
+                            if accept and jump > 0.3:
+                                route = planes[icao].get("route", [])
+                                if len(route) >= 2:
+                                    # Kierunek z dwóch ostatnich znanych pozycji
+                                    p1 = route[-2]
+                                    p2 = route[-1]
+                                    # Kierunek dotychczasowy (p1 → p2)
+                                    bearing_old = math.atan2(p2[1] - p1[1], p2[0] - p1[0])
+                                    # Kierunek nowy (p2 → nowa pozycja)
+                                    bearing_new = math.atan2(pos[1] - prev_lon, pos[0] - prev_lat)
+                                    # Różnica kątów w stopniach
+                                    angle_diff = abs(math.degrees(bearing_new - bearing_old)) % 360
+                                    if angle_diff > 180:
+                                        angle_diff = 360 - angle_diff
+                                    # Odrzuć jeśli zmiana kierunku > 70° (lustrzane CPR dają ~90°)
+                                    # ale tylko gdy skok jest wystarczająco duży żeby to miało sens
+                                    if angle_diff > 70 and jump > 1.0:
+                                        accept = False
+                                        print(f"Odrzucono zmianę kierunku {angle_diff:.0f}° (skok {jump:.1f} km) dla {icao}")
 
                     if accept:
                         print(f"Samolot znajduje się {dist:.1f} km ode mnie")

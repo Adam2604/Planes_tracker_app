@@ -85,11 +85,13 @@ def decode_details(hex_msg):
 
         #Logika pozycji - Odd/Even
         oe = pms.adsb.oe_flag(hex_msg)
-        if icao not in cpr_buffer:
-            cpr_buffer[icao] = [None, None] #Even, Odd
-        cpr_buffer[icao][oe] = (hex_msg, now)
+        
+        with planes_lock: # Zabezpieczamy dostęp do cpr_buffer na wypadek usuwania przez wątek cleaner
+            if icao not in cpr_buffer:
+                cpr_buffer[icao] = [None, None] #Even, Odd
+            cpr_buffer[icao][oe] = (hex_msg, now)
+            even, odd = cpr_buffer[icao]
 
-        even, odd = cpr_buffer[icao]
         if even and odd and abs(even[1] - odd[1]) < 1.5:
             pos = pms.adsb.position(even[0], odd[0], even[1], odd[1], MY_LAT, MY_LON)
             if pos:
@@ -261,10 +263,23 @@ def radio_loop():
             p7 = mag[7 : -9] #Sygnał w chwili T +7 próbek
             p9 = mag[9 : -7] #Sygnał w chwili T + 9 próbek
 
+            # Dołki (szum/brak sygnału w preambule) - poprawia skuteczność detekcji względem zniekształceń
+            p1 = mag[1: -15]
+            p3 = mag[3: -13]
+            p4 = mag[4: -12]
+            p5 = mag[5: -11]
+            p6 = mag[6: -10]
+            p8 = mag[8: -8]
+
             noise = np.mean(mag)
             threshold = noise * 3.5
+            
+            # Detekcja: górki muszą być ponad progiem ORAZ dołki muszą obrysowywać kształt impulsów
+            # To drastycznie zmniejsza wystąpienie 'False Positives' przy szumach.
             hits = (p0 > threshold) & (p2 > threshold) & \
-                   (p7 > threshold) & (p9 > threshold)
+                   (p7 > threshold) & (p9 > threshold) & \
+                   (p1 < p0) & (p1 < p2) & (p3 < p2) & (p4 < p2) & \
+                   (p5 < p7) & (p6 < p7) & (p8 < p7) & (p8 < p9)
             hit_indices = np.where(hits)[0]
             #Hits = True -> wiadomość od samolotu się zaczyna
 
@@ -283,10 +298,11 @@ def radio_loop():
                 except ValueError:
                     continue
 
-                #Filtrowanie - sprawdzanie tylko ramek zaczynających się od "8D"
+                #Filtrowanie - standardowy ADS-B (DF17 = "8D") 
+                #oraz sygnały zależne/TIS-B/ADS-R (DF18 = "90", "91", "92") dla większej ilości detekcji
                 #Dodatkowo za pomocą biblioteki pyModeS sprawdzamy sumę kontrolną
                 #żeby nie brac pod uwagę błędnych ramek
-                if hex_msg.startswith("8D"):
+                if hex_msg.startswith("8D") or hex_msg.startswith("90") or hex_msg.startswith("91") or hex_msg.startswith("92"):
                     try:
                         if pms.crc(hex_msg) == 0:
                             last_packet_time = time.time()  #aktualizacja czasu ostatniego pakietu

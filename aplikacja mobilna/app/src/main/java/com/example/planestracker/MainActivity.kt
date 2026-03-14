@@ -24,6 +24,6 @@ class MainActivity : AppCompatActivity() {
 
         // ZAŁADUJ STRONĘ Z MALINKI
         // Zmień ten adres na IP swojej Malinki!
-        myWebView.loadUrl("http://192.168.0.50:5000")
+        myWebView.loadUrl("https://planes-tracker.pl")
     }
 }

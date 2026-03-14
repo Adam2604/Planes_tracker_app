@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/nav_graph"
+    app:startDestination="@id/nav_map">
+
+    <fragment
+        android:id="@+id/nav_map"
+        android:name="com.example.planestrackernative.ui.map.MapFragment"
+        android:label="@string/nav_map" />
+
+    <fragment
+        android:id="@+id/nav_list"
+        android:name="com.example.planestrackernative.ui.list.ListFragment"
+        android:label="@string/nav_list" />
+
+    <fragment
+        android:id="@+id/nav_stats"
+        android:name="com.example.planestrackernative.ui.stats.StatsFragment"
+        android:label="@string/nav_stats" />
+
+</navigation>

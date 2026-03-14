@@ -1,0 +1,36 @@
+<resources>
+    <string name="app_name">Planes Tracker</string>
+    <string name="nav_map">Mapa</string>
+    <string name="nav_list">Lista</string>
+    <string name="nav_stats">Statystyki</string>
+    <string name="loading">Ładowanie…</string>
+    <string name="no_data">Brak danych</string>
+    <string name="error_connection">Błąd połączenia z serwerem</string>
+    <string name="all_flights">Wszystkie loty</string>
+    <string name="close_flights">Blisko (&lt; 5km)</string>
+    <string name="military_ghost">Wojskowe (Ghost)</string>
+    <string name="rarest_today">Najrzadszy dziś</string>
+    <string name="base_label">🏠 Baza (Jarocin)</string>
+    <string name="unknown_model">Nieznany model</string>
+    <string name="no_flights">Brak zarejestrowanych lotów</string>
+    <string name="filter">Filtruj</string>
+    <string name="date_from">Od:</string>
+    <string name="date_to">Do:</string>
+    <string name="show">Pokaż</string>
+    <string name="day">Dzień</string>
+    <string name="week">Tydzień</string>
+    <string name="month">Miesiąc</string>
+    <string name="light_planes">Lekkie samoloty</string>
+    <string name="farthest_plane">Najdalszy samolot</string>
+    <string name="ghost_detection">👻 Wykrycie Wojskowe (Ghost)</string>
+    <string name="ghost_detected">⚠️ WYKRYTO</string>
+    <string name="ghost_clear">BRAK (Czysto)</string>
+    <string name="top_models">🏆 Najpopularniejsze Modele</string>
+    <string name="rare_models">💎 Unikaty (Najrzadziej widziane)</string>
+    <string name="no_gps">Brak pozycji GPS</string>
+    <string name="close_map">Zamknij</string>
+    <string name="route_title">✈️ Trasa: %1$s — %2$s</string>
+    <string name="analyzing_sky">Analizuję niebo…</string>
+    <string name="yes_alert">TAK! ⚠️</string>
+    <string name="no_alert">NIE</string>
+</resources>

@@ -12,7 +12,7 @@ import sys
 from datetime import date, datetime, timedelta
 import logging
 
-#Moje współrzędne
+#Współrzędne anteny
 MY_LAT = 51.978
 MY_LON = 17.498
 
@@ -106,14 +106,12 @@ def decode_details(hex_msg):
                             dt = now - prev_time if prev_time else 10
 
                             # Filtr 1: Max prędkość ~1200 km/h = 0.333 km/s
-                            max_dist = max(0.4 * dt, 2)  # min 2 km tolerancji (zmniejszone z 5)
+                            max_dist = max(0.4 * dt, 2)
                             if jump > max_dist:
                                 accept = False
                                 print(f"Odrzucono skok pozycji {jump:.1f} km (max {max_dist:.1f} km) dla {icao}")
 
-                            # Filtr 2: Sprawdzenie zgodności kierunku lotu
-                            # Lustrzane pozycje CPR powodują nagłe zmiany kierunku
-                            # — samolot "skacze" w bok, co daje kąt ~90° do kursu
+
                             if accept and jump > 0.3:
                                 route = planes[icao].get("route", [])
                                 if len(route) >= 2:
@@ -128,7 +126,7 @@ def decode_details(hex_msg):
                                     angle_diff = abs(math.degrees(bearing_new - bearing_old)) % 360
                                     if angle_diff > 180:
                                         angle_diff = 360 - angle_diff
-                                    # Odrzuć jeśli zmiana kierunku > 70° (lustrzane CPR dają ~90°)
+                                    # Odrzuć jeśli zmiana kierunku > 70°
                                     # ale tylko gdy skok jest wystarczająco duży żeby to miało sens
                                     if angle_diff > 70 and jump > 1.0:
                                         accept = False
@@ -373,6 +371,26 @@ def stats_page():
     stats = data_base.get_history_stats(date_param, mode_param)
 
     return render_template('stats.html', s=stats, current_date=date_param, current_mode=mode_param)
+
+@app.route('/api/list')
+def api_list():
+    date_from = request.args.get('date_from', date.today().strftime('%Y-%m-%d'))
+    date_to = request.args.get('date_to', date_from)
+    flights = data_base.get_flights_list(date_from, date_to)
+    return jsonify(flights)
+
+@app.route('/api/stats')
+def api_stats():
+    mode_param = request.args.get('mode', 'day')
+    if mode_param == 'month':
+        default_date = date.today().strftime("%Y-%m")
+    else:
+        default_date = date.today().strftime("%Y-%m-%d")
+    date_param = request.args.get('date', default_date)
+    if mode_param == "month" and len(date_param) > 7:
+        date_param = date_param[:7]
+    stats = data_base.get_history_stats(date_param, mode_param)
+    return jsonify(stats) if stats else jsonify({})
 
 @app.route('/')
 def index():

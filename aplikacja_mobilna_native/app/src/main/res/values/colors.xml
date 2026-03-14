@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- Dark theme palette -->
+    <color name="background_primary">#FF1A1A1A</color>
+    <color name="background_card">#FF2A2A2A</color>
+    <color name="background_surface">#FF333333</color>
+    <color name="background_input">#FF222222</color>
+
+    <color name="accent_green">#FF4CAF50</color>
+    <color name="accent_green_dark">#FF388E3C</color>
+    <color name="accent_blue">#FF2196F3</color>
+    <color name="accent_orange">#FFFF9800</color>
+    <color name="accent_purple">#FF9C27B0</color>
+    <color name="accent_red">#FFF44336</color>
+    <color name="accent_yellow">#FFFFEB3B</color>
+    <color name="accent_gold">#FFFFC107</color>
+
+    <color name="text_primary">#FFFFFFFF</color>
+    <color name="text_secondary">#FFAAAAAA</color>
+    <color name="text_tertiary">#FF888888</color>
+    <color name="text_dim">#FF666666</color>
+
+    <color name="border">#FF444444</color>
+    <color name="border_light">#FF555555</color>
+
+    <color name="nav_background">#F0141414</color>
+</resources>

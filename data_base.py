@@ -49,7 +49,7 @@ def save_flight(plane):
     
     # Dane do zapisu
     icao = plane.get('icao')
-    current_min_dist = plane.get('min_dist', 9999)
+    current_min_dist = plane.get('min_dist')
     current_speed = plane.get('speed', 0)
     current_max_speed = plane.get('max_speed', current_speed) 
     current_last_seen = int(plane['last_seen'])
@@ -70,9 +70,16 @@ def save_flight(plane):
         row_id, old_dist, old_speed, old_first, old_has_loc, old_route_json = existing_row
         
         # Wybieramy najlepsze wartości z obu przelotów
-        new_best_dist = min(old_dist, current_min_dist)
-        new_best_speed = max(old_speed, current_max_speed)
-        new_has_loc = 1 if new_best_dist != 9999 else 0
+        if old_dist is None and current_min_dist is None:
+            new_best_dist = None
+        elif old_dist is None:
+            new_best_dist = current_min_dist
+        elif current_min_dist is None:
+            new_best_dist = old_dist
+        else:
+            new_best_dist = min(old_dist, current_min_dist)
+
+        new_has_loc = 1 if new_best_dist is not None else 0
 
         # Scalanie tras — stara trasa + separator null + nowa trasa
         merged_route = []
@@ -98,7 +105,7 @@ def save_flight(plane):
 
     else:
         # NOWY WPIS
-        has_loc = 1 if current_min_dist != 9999 else 0
+        has_loc = 1 if current_min_dist is not None else 0
         
         c.execute("INSERT INTO historia VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
             icao,
@@ -558,12 +565,16 @@ def get_flights_list(date_from=None, date_to=None):
             time_str = datetime.fromtimestamp(row[3]).strftime('%H:%M')
         has_route = bool(row[6] and row[6] != '[]' and row[6] != 'null')
         
+        # Bezpieczne ładowanie dystansu, żeby uniknąć exception w jsonach
+        raw_dist = row[4]
+        safe_dist = 9999.0 if raw_dist is None else round(raw_dist, 1)
+
         results.append({
             "rowid": row[0],
             "icao": row[1],
             "model": row[2],
             "time": time_str,
-            "dist": round(row[4], 1),
+            "dist": safe_dist, #Dla frontendów listowych wspierających "9999" jako ukrycie (Android) i list.html
             "speed": row[5],
             "has_route": has_route
         })

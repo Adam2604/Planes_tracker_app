@@ -178,8 +178,8 @@ def actualize_plane(icao, dane):
                 "icao": icao,
                 "first_seen": time.time(),
                 "model": model_info,
-                "dist": 9999,  #domyślna wartość dystansu
-                "min_dist": 9999,
+                "dist": None,  #domyślna wartość dystansu
+                "min_dist": None,
                 "speed": 0,
                 "max_speed": 0,
                 "category": 0,
@@ -192,7 +192,7 @@ def actualize_plane(icao, dane):
             planes[icao]["route"].append([dane["lat"], dane["lon"]])
 
         if "dist" in dane:
-            if dane["dist"] < planes[icao]["min_dist"]:
+            if planes[icao]["min_dist"] is None or dane["dist"] < planes[icao]["min_dist"]:
                 planes[icao]["min_dist"] = dane["dist"]
 
         if "speed" in dane:
@@ -224,7 +224,7 @@ def watchdog():
         time.sleep(60) #sprawdzanie co minutę
         if time.time() - last_packet_time > 3600: #brak pakietów przez godzinę
             print("Brak sygnału przez godzinę, restart programu.")
-            sys.exit(1)
+            os.system("sudo reboot")
         
         #Sprawdzanie czy minęła północ
         current_date = date.today()

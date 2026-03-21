@@ -168,7 +168,7 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     a = math.sin(delta_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
     return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
 
-def actualize_plane(icao, dane):
+def actualize_plane(icao, dane, update_last_seen=True):
     #Aktualizuje lub tworzy samolot w bazie danych
     with planes_lock:
         if icao not in planes:
@@ -185,8 +185,10 @@ def actualize_plane(icao, dane):
                 "category": 0,
                 "route": []
             }
+            planes[icao]["last_seen"] = time.time()  # Nowy samolot — zawsze ustaw
         planes[icao].update(dane)
-        planes[icao]["last_seen"] = time.time()
+        if update_last_seen:
+            planes[icao]["last_seen"] = time.time()
 
         if "lat" in dane and "lon" in dane:
             planes[icao]["route"].append([dane["lat"], dane["lon"]])
@@ -325,7 +327,7 @@ def radio_loop():
                         if pms.crc(hex_msg) == 0:
                             last_packet_time = time.time()
                             icao = pms.icao(hex_msg)
-                            actualize_plane(icao, {})
+                            actualize_plane(icao, {}, update_last_seen=False)
                             print(f"DF11 All-Call od ICAO: {icao}")
                     except:
                         pass
@@ -339,10 +341,10 @@ def radio_loop():
                             alt = pms.common.altcode(hex_msg)
                             if alt:
                                 alt_m = round(alt * 0.3048)
-                                actualize_plane(icao, {"altitude": alt_m})
+                                actualize_plane(icao, {"altitude": alt_m}, update_last_seen=False)
                                 print(f"Comm-B altitude od ICAO: {icao}, wysokość: {alt_m} m")
                             else:
-                                actualize_plane(icao, {})
+                                actualize_plane(icao, {}, update_last_seen=False)
                     except:
                         pass
     except KeyboardInterrupt:

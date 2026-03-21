@@ -92,11 +92,11 @@ def decode_details(hex_msg):
             cpr_buffer[icao][oe] = (hex_msg, now)
             even, odd = cpr_buffer[icao]
 
-        if even and odd and abs(even[1] - odd[1]) < 1.5:
+        if even and odd and abs(even[1] - odd[1]) < 10:  # Standard ADS-B pozwala do 10s dla local decoding
             pos = pms.adsb.position(even[0], odd[0], even[1], odd[1], MY_LAT, MY_LON)
             if pos:
                 dist = calculate_distance(MY_LAT, MY_LON, pos[0], pos[1])
-                if dist < 600:
+                if dist < 800:  # Zwiększony zasięg — CRC i tak filtruje błędne pozycje
                     # Filtrowanie skoków pozycji
                     accept = True
                     with planes_lock:
@@ -248,13 +248,14 @@ def radio_loop():
     sdr.sample_rate = 2000000
     sdr.center_freq = 1090000000
     sdr.freq_correction = 1
+    sdr.gain = 49.6
 
     global last_packet_time
 
     print("Czekam na sygnał")
     try:
         while True:
-            samples = sdr.read_samples(256 * 1024)
+            samples = sdr.read_samples(512 * 1024)  # Większy bufor = mniej luk w odczycie
             mag = np.abs(samples) #amplituda
 
             #Wykrywanie preambuły
@@ -271,8 +272,8 @@ def radio_loop():
             p6 = mag[6: -10]
             p8 = mag[8: -8]
 
-            noise = np.mean(mag)
-            threshold = noise * 3.5
+            noise = np.median(mag)  # Mediana — odporna na outliery od bliskich samolotów
+            threshold = noise * 3.0
             
             # Detekcja: górki muszą być ponad progiem ORAZ dołki muszą obrysowywać kształt impulsów
             # To drastycznie zmniejsza wystąpienie 'False Positives' przy szumach.
@@ -302,15 +303,46 @@ def radio_loop():
                 #oraz sygnały zależne/TIS-B/ADS-R (DF18 = "90", "91", "92") dla większej ilości detekcji
                 #Dodatkowo za pomocą biblioteki pyModeS sprawdzamy sumę kontrolną
                 #żeby nie brac pod uwagę błędnych ramek
-                if hex_msg.startswith("8D") or hex_msg.startswith("90") or hex_msg.startswith("91") or hex_msg.startswith("92"):
+                first_two = hex_msg[:2]
+                first_byte = int(first_two, 16) if len(hex_msg) >= 2 else 0
+
+                # DF17 (ADS-B) i DF18 (TIS-B/ADS-R) — pełne dane
+                if first_two in ("8D", "90", "91", "92"):
                     try:
                         if pms.crc(hex_msg) == 0:
-                            last_packet_time = time.time()  #aktualizacja czasu ostatniego pakietu
+                            last_packet_time = time.time()
                             icao = pms.icao(hex_msg)
                             tc = pms.typecode(hex_msg)
                             print(f"Odebrano wiadomość od samolotu ICAO: {icao}, \nType Code: {tc}, HEX: {hex_msg}")
                             decode_details(hex_msg)
                             print("-"*40)
+                    except:
+                        pass
+
+                # DF11 (Mode S All-Call Reply)
+                elif first_two == "5D":
+                    try:
+                        if pms.crc(hex_msg) == 0:
+                            last_packet_time = time.time()
+                            icao = pms.icao(hex_msg)
+                            actualize_plane(icao, {})
+                            print(f"DF11 All-Call od ICAO: {icao}")
+                    except:
+                        pass
+
+                # DF20/DF21 (Comm-B)
+                elif 0xA0 <= first_byte <= 0xBF:
+                    try:
+                        if pms.crc(hex_msg) == 0:
+                            last_packet_time = time.time()
+                            icao = pms.icao(hex_msg)
+                            alt = pms.common.altcode(hex_msg)
+                            if alt:
+                                alt_m = round(alt * 0.3048)
+                                actualize_plane(icao, {"altitude": alt_m})
+                                print(f"Comm-B altitude od ICAO: {icao}, wysokość: {alt_m} m")
+                            else:
+                                actualize_plane(icao, {})
                     except:
                         pass
     except KeyboardInterrupt:

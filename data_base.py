@@ -59,15 +59,23 @@ def save_flight(plane):
     today_midnight = datetime.combine(date.today(), datetime.min.time()).timestamp()
 
     # Sprawdzamy, czy ten samolot już był dzisiaj w bazie
-    c.execute("""SELECT rowid, min_dist, max_speed, first_seen, has_location, route 
+    c.execute("""SELECT rowid, min_dist, max_speed, first_seen, last_seen, has_location, route 
                  FROM historia 
-                 WHERE icao = ? AND last_seen > ?""", (icao, today_midnight))
+                 WHERE icao = ? AND last_seen > ?
+                 ORDER BY last_seen DESC LIMIT 1""", (icao, today_midnight))
     
     existing_row = c.fetchone()
 
+    # Jeśli przerwa > 10 min — to nowy, oddzielny przelot, nie scalaj
     if existing_row:
-        # Samolot już był dzisiaj. Scalamy dane.
-        row_id, old_dist, old_speed, old_first, old_has_loc, old_route_json = existing_row
+        old_last_seen = existing_row[4]
+        gap = plane['first_seen'] - old_last_seen
+        if gap > 600:
+            existing_row = None  # Traktuj jako nowy wpis
+
+    if existing_row:
+        # Samolot był niedawno (< 10 min przerwy). Scalamy dane.
+        row_id, old_dist, old_speed, old_first, old_last_seen, old_has_loc, old_route_json = existing_row
         
         # Wybieramy najlepsze wartości z obu przelotów
         if old_dist is None and current_min_dist is None:
@@ -79,6 +87,7 @@ def save_flight(plane):
         else:
             new_best_dist = min(old_dist, current_min_dist)
 
+        new_best_speed = max(old_speed or 0, current_max_speed or 0)
         new_has_loc = 1 if new_best_dist is not None else 0
 
         # Scalanie tras — stara trasa + separator null + nowa trasa

@@ -221,6 +221,48 @@ class TestSaveFlight:
         assert route[0] == [51.0, 17.0]
         assert route[-1] == [52.0, 18.0]
 
+    def test_no_merge_when_gap_over_10min(self, test_db):
+        """Przerwa > 10 min → osobne wpisy, nie scalanie."""
+        now = time.time()
+        plane1 = _make_plane(min_dist=100.0, max_speed=500,
+                             route=[[51.0, 17.0], [51.5, 17.5]],
+                             first_seen=now - 3600, last_seen=now - 3000)
+        # Przerwa 2400s (~40 min) > 600s
+        plane2 = _make_plane(min_dist=30.0, max_speed=900,
+                             route=[[52.0, 18.0], [52.5, 18.5]],
+                             first_seen=now - 600, last_seen=now)
+        data_base.save_flight(plane1)
+        data_base.save_flight(plane2)
+
+        conn = sqlite3.connect(test_db)
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM historia WHERE icao = 'ABC123'")
+        count = c.fetchone()[0]
+        conn.close()
+        assert count == 2  # Dwa osobne wpisy
+
+    def test_merge_when_gap_under_10min(self, test_db):
+        """Przerwa < 10 min → scalenie (kontynuacja lotu)."""
+        now = time.time()
+        plane1 = _make_plane(min_dist=100.0, max_speed=500,
+                             first_seen=now - 600, last_seen=now - 300)
+        # Przerwa 200s (~3 min) < 600s
+        plane2 = _make_plane(min_dist=30.0, max_speed=900,
+                             first_seen=now - 100, last_seen=now)
+        data_base.save_flight(plane1)
+        data_base.save_flight(plane2)
+
+        conn = sqlite3.connect(test_db)
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM historia WHERE icao = 'ABC123'")
+        count = c.fetchone()[0]
+        c.execute("SELECT min_dist, max_speed FROM historia WHERE icao = 'ABC123'")
+        row = c.fetchone()
+        conn.close()
+        assert count == 1  # Scalony wpis
+        assert row[0] == 30.0   # min z obu
+        assert row[1] == 900    # max z obu
+
     def test_different_icao_creates_separate_rows(self, test_db):
         data_base.save_flight(_make_plane(icao="AAA"))
         data_base.save_flight(_make_plane(icao="BBB"))

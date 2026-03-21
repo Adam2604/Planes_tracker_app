@@ -440,6 +440,27 @@ def api_stats():
     stats = data_base.get_history_stats(date_param, mode_param)
     return jsonify(stats) if stats else jsonify({})
 
+@app.route('/api/range_map')
+def api_range_map():
+    mode_param = request.args.get('mode', 'day')
+    if mode_param == 'month':
+        default_date = date.today().strftime("%Y-%m")
+    else:
+        default_date = date.today().strftime("%Y-%m-%d")
+    date_param = request.args.get('date', default_date)
+    if mode_param == "month" and len(date_param) > 7:
+        date_param = date_param[:7]
+
+    # Przekaż aktywne samoloty jeśli to dzisiejszy dzień
+    active = None
+    today_str = date.today().strftime("%Y-%m-%d")
+    if mode_param == 'day' and date_param == today_str:
+        with planes_lock:
+            active = [dict(p) for p in planes.values()]
+
+    sectors = data_base.get_range_data(date_param, mode_param, active)
+    return jsonify({"sectors": sectors, "antenna": {"lat": MY_LAT, "lon": MY_LON}})
+
 @app.route('/')
 def index():
     return render_template('index.html')

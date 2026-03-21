@@ -596,6 +596,106 @@ def get_flight_route(rowid):
         route = []
     return row[0], route
 
+def get_range_data(date_str, mode='day', active_planes=None):
+    """Oblicza zasięg radiowy w 36 sektorach (co 10°).
+    Zwraca listę: [{ angle: 0, dist: 123.4 }, ...] dla każdego sektora."""
+    import math
+
+    MY_LAT = 51.978
+    MY_LON = 17.498
+    NUM_SECTORS = 36
+    SECTOR_SIZE = 360 / NUM_SECTORS
+
+    def _haversine(lat1, lon1, lat2, lon2):
+        R = 6371
+        p1, p2 = math.radians(lat1), math.radians(lat2)
+        dp = math.radians(lat2 - lat1)
+        dl = math.radians(lon2 - lon1)
+        a = math.sin(dp/2)**2 + math.cos(p1)*math.cos(p2)*math.sin(dl/2)**2
+        return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
+
+    def _bearing(lat1, lon1, lat2, lon2):
+        p1, p2 = math.radians(lat1), math.radians(lat2)
+        dl = math.radians(lon2 - lon1)
+        x = math.sin(dl) * math.cos(p2)
+        y = math.cos(p1)*math.sin(p2) - math.sin(p1)*math.cos(p2)*math.cos(dl)
+        brng = math.degrees(math.atan2(x, y))
+        return (brng + 360) % 360
+
+    sectors = [0.0] * NUM_SECTORS
+
+    def _process_point(lat, lon):
+        dist = _haversine(MY_LAT, MY_LON, lat, lon)
+        if dist < 1 or dist > 800:
+            return
+        brng = _bearing(MY_LAT, MY_LON, lat, lon)
+        idx = int(brng / SECTOR_SIZE) % NUM_SECTORS
+        if dist > sectors[idx]:
+            sectors[idx] = dist
+
+    # 1. Pobierz trasy z bazy danych
+    conn = sqlite3.connect(DB_NAME, timeout=10)
+    c = conn.cursor()
+
+    today_str = date.today().strftime("%Y-%m-%d")
+
+    if mode == 'day':
+        if date_str == today_str:
+            # Dzisiaj — dane z bazy + aktywne samoloty
+            today_midnight = datetime.combine(date.today(), datetime.min.time()).timestamp()
+            c.execute("SELECT route FROM historia WHERE last_seen > ? AND route IS NOT NULL", (today_midnight,))
+        else:
+            day_start = datetime.strptime(date_str, "%Y-%m-%d").timestamp()
+            day_end = day_start + 86400
+            c.execute("SELECT route FROM historia WHERE last_seen >= ? AND last_seen < ? AND route IS NOT NULL", (day_start, day_end))
+    elif mode == 'week':
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        start_week = dt - timedelta(days=dt.weekday())
+        end_week = start_week + timedelta(days=7)
+        c.execute("SELECT route FROM historia WHERE last_seen >= ? AND last_seen < ? AND route IS NOT NULL",
+                  (start_week.timestamp(), end_week.timestamp()))
+    elif mode == 'month':
+        import calendar
+        parts = date_str.split('-')
+        y, m = int(parts[0]), int(parts[1])
+        last_day = calendar.monthrange(y, m)[1]
+        s = datetime(y, m, 1).timestamp()
+        e = datetime(y, m, last_day, 23, 59, 59).timestamp()
+        c.execute("SELECT route FROM historia WHERE last_seen >= ? AND last_seen < ? AND route IS NOT NULL", (s, e))
+
+    rows = c.fetchall()
+    conn.close()
+
+    # Parsowanie tras z bazy
+    for row in rows:
+        if not row[0]:
+            continue
+        try:
+            route = json.loads(row[0])
+            for point in route:
+                if point is None:
+                    continue
+                if isinstance(point, list) and len(point) == 2:
+                    _process_point(point[0], point[1])
+        except:
+            continue
+
+    # 2. Dodaj aktywne samoloty (jeśli to dzisiejszy dzień)
+    if mode == 'day' and date_str == today_str and active_planes:
+        for plane in active_planes:
+            if "lat" in plane and "lon" in plane:
+                _process_point(plane["lat"], plane["lon"])
+
+    # Buduj wynik
+    result = []
+    for i in range(NUM_SECTORS):
+        result.append({
+            "angle": i * SECTOR_SIZE,
+            "dist": round(sectors[i], 1)
+        })
+
+    return result
+
 def delete_old_data():
     conn = sqlite3.connect(DB_NAME, timeout = 10)
     c = conn.cursor()

@@ -6,6 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Szczegółowe Statystyki</title>
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         body {
             background-color: #1a1a1a;
@@ -180,6 +182,42 @@
                 opacity: 1;
             }
         }
+
+        /* Mapa zasięgu */
+        .range-section {
+            margin-top: 20px;
+            margin-bottom: 20px;
+        }
+
+        #range-map {
+            height: 500px;
+            width: 100%;
+            border-radius: 15px;
+            border: 1px solid #333;
+            overflow: hidden;
+        }
+
+        .range-legend {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #aaa;
+        }
+
+        .legend-swatch {
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+        }
     </style>
 </head>
 
@@ -222,7 +260,7 @@
             <div class="number c-green">{{ s.total }}</div>
         </div>
         <div class="card">
-            <div class="label">Blisko (<5km)< /div>
+            <div class="label">Blisko (<5km)</div>
                     <div class="number c-blue">{{ s.close }}</div>
             </div>
             <div class="card">
@@ -277,6 +315,30 @@
             {% endfor %}
         </div>
 
+        <!-- Mapa zasięgu radiowego -->
+        <div class="range-section">
+            <div class="label" style="text-align: center; margin-bottom: 15px; font-size: 14px;">📡 Zasięg Radiowy</div>
+            <div id="range-map"></div>
+            <div class="range-legend">
+                <div class="legend-item">
+                    <div class="legend-swatch" style="background: #1565C0;"></div>
+                    <span>< 100 km</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-swatch" style="background: #00E676;"></div>
+                    <span>100-200 km</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-swatch" style="background: #FF9100;"></div>
+                    <span>200-350 km</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-swatch" style="background: #D50000;"></div>
+                    <span>> 350 km</span>
+                </div>
+            </div>
+        </div>
+
         {% else %}
 
         <div
@@ -293,6 +355,211 @@
         </div>
 
         {% endif %}
+
+    <script>
+    (function() {
+        var mapEl = document.getElementById('range-map');
+        if (!mapEl) return;
+
+        // Parametry z URL
+        var params = new URLSearchParams(window.location.search);
+        var dateParam = params.get('date') || '{{ current_date }}';
+        var modeParam = params.get('mode') || '{{ current_mode }}';
+
+        var rangeMap = L.map('range-map', {
+            center: [51.978, 17.498],
+            zoom: 8,
+            zoomControl: true,
+            attributionControl: false
+        });
+
+        // Mapa terenu
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap',
+            maxZoom: 19
+        }).addTo(rangeMap);
+
+        // Marker anteny
+        L.circleMarker([51.978, 17.498], {
+            radius: 6,
+            fillColor: '#4CAF50',
+            color: '#fff',
+            weight: 2,
+            fillOpacity: 1
+        }).addTo(rangeMap).bindPopup('📡 Antena');
+
+        // Kręgi dystansowe
+        [50, 100, 200, 350, 500].forEach(function(r) {
+            L.circle([51.978, 17.498], {
+                radius: r * 1000,
+                color: '#555',
+                weight: 1,
+                fill: false,
+                dashArray: '5,8',
+                interactive: false
+            }).addTo(rangeMap);
+
+            // Etykieta dystansu
+            var labelLat = 51.978 + (r / 111.32);
+            L.marker([labelLat, 17.498], {
+                icon: L.divIcon({
+                    className: '',
+                    html: '<span style="color:#777;font-size:10px;background:rgba(26,26,26,0.8);padding:1px 4px;border-radius:3px;">' + r + ' km</span>',
+                    iconSize: [50, 14],
+                    iconAnchor: [25, 7]
+                }),
+                interactive: false
+            }).addTo(rangeMap);
+        });
+
+        // Pobranie danych zasięgu
+        fetch('/api/range_map?date=' + encodeURIComponent(dateParam) + '&mode=' + encodeURIComponent(modeParam))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.sectors || data.sectors.length === 0) return;
+
+                var antLat = data.antenna.lat;
+                var antLon = data.antenna.lon;
+                var sectors = data.sectors;
+                var maxDist = 0;
+
+                sectors.forEach(function(s) {
+                    if (s.dist > maxDist) maxDist = s.dist;
+                });
+
+                if (maxDist === 0) {
+                    // Brak danych — pokaż info
+                    L.marker([antLat, antLon + 0.5], {
+                        icon: L.divIcon({
+                            className: '',
+                            html: '<span style="color:#888;font-size:13px;">Brak danych o zasięgu</span>',
+                            iconSize: [160, 20],
+                            iconAnchor: [80, 10]
+                        }),
+                        interactive: false
+                    }).addTo(rangeMap);
+                    return;
+                }
+
+                // Funkcja: oblicz punkt (lat, lon) z danego dystansu i kąta
+                function destPoint(lat, lon, distKm, bearingDeg) {
+                    var R = 6371;
+                    var d = distKm / R;
+                    var brng = bearingDeg * Math.PI / 180;
+                    var lat1 = lat * Math.PI / 180;
+                    var lon1 = lon * Math.PI / 180;
+
+                    var lat2 = Math.asin(
+                        Math.sin(lat1) * Math.cos(d) +
+                        Math.cos(lat1) * Math.sin(d) * Math.cos(brng)
+                    );
+                    var lon2 = lon1 + Math.atan2(
+                        Math.sin(brng) * Math.sin(d) * Math.cos(lat1),
+                        Math.cos(d) - Math.sin(lat1) * Math.sin(lat2)
+                    );
+
+                    return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
+                }
+
+                // Kolor na podstawie dystansu
+                function distColor(d) {
+                    if (d < 100) return '#1565C0';
+                    if (d < 200) return '#00E676';
+                    if (d < 350) return '#FF9100';
+                    return '#D50000';
+                }
+
+                // Budowanie wielokąta sektorowego z kolorowymi trójkątami
+                var polygonPoints = [];
+
+                for (var i = 0; i < sectors.length; i++) {
+                    var s = sectors[i];
+                    var dist = s.dist > 0 ? s.dist : 5;
+                    var angle = s.angle;
+                    var pt = destPoint(antLat, antLon, dist, angle);
+                    polygonPoints.push(pt);
+                }
+                // Zamknij wielokąt
+                polygonPoints.push(polygonPoints[0]);
+
+                // Rysuj główny wielokąt zasięgu
+                L.polygon(polygonPoints, {
+                    color: '#2196F3',
+                    weight: 2,
+                    fillColor: '#2196F3',
+                    fillOpacity: 0.15,
+                    smoothFactor: 1.5
+                }).addTo(rangeMap);
+
+                // Kolorowe segmenty — trójkąty od anteny do par sąsiednich sektorów
+                for (var i = 0; i < sectors.length; i++) {
+                    var s1 = sectors[i];
+                    var s2 = sectors[(i + 1) % sectors.length];
+                    var avgDist = (s1.dist + s2.dist) / 2;
+                    if (avgDist < 1) continue;
+
+                    var d1 = s1.dist > 0 ? s1.dist : 5;
+                    var d2 = s2.dist > 0 ? s2.dist : 5;
+
+                    var pt1 = destPoint(antLat, antLon, d1, s1.angle);
+                    var pt2 = destPoint(antLat, antLon, d2, s2.angle);
+
+                    L.polygon([
+                        [antLat, antLon], pt1, pt2
+                    ], {
+                        color: 'transparent',
+                        weight: 0,
+                        fillColor: distColor(avgDist),
+                        fillOpacity: 0.25,
+                        interactive: false
+                    }).addTo(rangeMap);
+                }
+
+                // Dopasuj widok do wielokąta
+                var bounds = L.latLngBounds(polygonPoints);
+                rangeMap.fitBounds(bounds.pad(0.15));
+
+                // Tooltips z dystansem na najbardziej oddalonych sektorach
+                var sortedSectors = sectors.slice().sort(function(a, b) { return b.dist - a.dist; });
+                var topN = Math.min(4, sortedSectors.filter(function(s) { return s.dist > 0; }).length);
+
+                for (var i = 0; i < topN; i++) {
+                    var ts = sortedSectors[i];
+                    if (ts.dist < 10) continue;
+                    var tpt = destPoint(antLat, antLon, ts.dist, ts.angle);
+                    L.circleMarker(tpt, {
+                        radius: 4,
+                        fillColor: distColor(ts.dist),
+                        color: '#fff',
+                        weight: 1,
+                        fillOpacity: 0.9
+                    }).addTo(rangeMap).bindTooltip(ts.dist + ' km', {
+                        permanent: true,
+                        direction: 'top',
+                        className: 'range-tooltip'
+                    });
+                }
+            })
+            .catch(function(err) {
+                console.error('Błąd mapy zasięgu:', err);
+            });
+    })();
+    </script>
+
+    <style>
+        .range-tooltip {
+            background: rgba(0,0,0,0.8);
+            border: 1px solid #555;
+            color: #fff;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+        }
+        .range-tooltip::before {
+            border-top-color: rgba(0,0,0,0.8) !important;
+        }
+    </style>
 
 </body>
 

@@ -201,7 +201,7 @@ def archive_past_days():
         mil_ghost = ghost_row[0] if ghost_row else None 
         
         # 3. Najdalszy
-        c.execute("SELECT model, max_dist FROM historia WHERE last_seen >= ? AND last_seen < ? AND max_dist IS NOT NULL AND max_dist > 0 ORDER BY max_dist DESC LIMIT 1", (day_start, day_end))
+        c.execute("SELECT model, COALESCE(max_dist, min_dist) as best_dist FROM historia WHERE last_seen >= ? AND last_seen < ? AND COALESCE(max_dist, min_dist) IS NOT NULL AND COALESCE(max_dist, min_dist) < 9000 ORDER BY best_dist DESC LIMIT 1", (day_start, day_end))
         f_row = c.fetchone()
         f_model = f_row[0] if f_row else ""
         f_dist = f_row[1] if f_row else 0
@@ -527,13 +527,14 @@ def get_detailed_stats_today():
     scored_models.sort(key=lambda x: (x[2], -x[1]), reverse=True)
     rare_models = [(model, count) for model, count, points in scored_models[:5]]
 
-    #Najdalszy odebrany samolot (wg max_dist — najdalsza odległość wykrycia)
+    #Najdalszy odebrany samolot (wg max_dist, fallback na min_dist dla starych danych)
     c.execute("""
-        SELECT model, max_dist
+        SELECT model, COALESCE(max_dist, min_dist) as best_dist
         FROM historia
         WHERE last_seen > ? 
-        AND max_dist IS NOT NULL AND max_dist > 0
-        ORDER BY max_dist DESC
+        AND COALESCE(max_dist, min_dist) IS NOT NULL
+        AND COALESCE(max_dist, min_dist) < 9000
+        ORDER BY best_dist DESC
         LIMIT 1
     """, (today_midnight,))
 

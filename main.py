@@ -180,6 +180,7 @@ def actualize_plane(icao, dane, update_last_seen=True):
                 "model": model_info,
                 "dist": None,  #domyślna wartość dystansu
                 "min_dist": None,
+                "max_dist": None,
                 "speed": 0,
                 "max_speed": 0,
                 "category": 0,
@@ -196,6 +197,8 @@ def actualize_plane(icao, dane, update_last_seen=True):
         if "dist" in dane:
             if planes[icao]["min_dist"] is None or dane["dist"] < planes[icao]["min_dist"]:
                 planes[icao]["min_dist"] = dane["dist"]
+            if planes[icao]["max_dist"] is None or dane["dist"] > planes[icao]["max_dist"]:
+                planes[icao]["max_dist"] = dane["dist"]
 
         if "speed" in dane:
             if dane["speed"] > planes[icao]["max_speed"]:

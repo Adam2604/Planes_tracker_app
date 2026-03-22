@@ -15,11 +15,16 @@ def init_db():
                     icao TEXT, callsign TEXT, model TEXT, min_dist REAL,
                     max_speed INTEGER, category INTEGER, has_location INTEGER,
                     first_seen INTEGER, last_seen INTEGER,
-                    route TEXT
+                    route TEXT, max_dist REAL
                 )''')
     # Migracja — dodanie kolumny route jeśli nie istnieje (dla istniejących baz)
     try:
         c.execute("ALTER TABLE historia ADD COLUMN route TEXT")
+    except sqlite3.OperationalError:
+        pass  # Kolumna już istnieje
+    # Migracja — dodanie kolumny max_dist (najdalsza odległość wykrycia)
+    try:
+        c.execute("ALTER TABLE historia ADD COLUMN max_dist REAL")
     except sqlite3.OperationalError:
         pass  # Kolumna już istnieje
     c.execute("CREATE INDEX IF NOT EXISTS idx_icao_time ON historia (icao, last_seen)")
@@ -50,6 +55,7 @@ def save_flight(plane):
     # Dane do zapisu
     icao = plane.get('icao')
     current_min_dist = plane.get('min_dist')
+    current_max_dist = plane.get('max_dist')
     current_speed = plane.get('speed', 0)
     current_max_speed = plane.get('max_speed', current_speed) 
     current_last_seen = int(plane['last_seen'])
@@ -59,7 +65,7 @@ def save_flight(plane):
     today_midnight = datetime.combine(date.today(), datetime.min.time()).timestamp()
 
     # Sprawdzamy, czy ten samolot już był dzisiaj w bazie
-    c.execute("""SELECT rowid, min_dist, max_speed, first_seen, last_seen, has_location, route 
+    c.execute("""SELECT rowid, min_dist, max_speed, first_seen, last_seen, has_location, route, max_dist 
                  FROM historia 
                  WHERE icao = ? AND last_seen > ?
                  ORDER BY last_seen DESC LIMIT 1""", (icao, today_midnight))
@@ -75,7 +81,7 @@ def save_flight(plane):
 
     if existing_row:
         # Samolot był niedawno (< 10 min przerwy). Scalamy dane.
-        row_id, old_dist, old_speed, old_first, old_last_seen, old_has_loc, old_route_json = existing_row
+        row_id, old_dist, old_speed, old_first, old_last_seen, old_has_loc, old_route_json, old_max_dist = existing_row
         
         # Wybieramy najlepsze wartości z obu przelotów
         if old_dist is None and current_min_dist is None:
@@ -86,6 +92,16 @@ def save_flight(plane):
             new_best_dist = old_dist
         else:
             new_best_dist = min(old_dist, current_min_dist)
+
+        # max_dist — najdalsza odległość wykrycia
+        if old_max_dist is None and current_max_dist is None:
+            new_best_max_dist = None
+        elif old_max_dist is None:
+            new_best_max_dist = current_max_dist
+        elif current_max_dist is None:
+            new_best_max_dist = old_max_dist
+        else:
+            new_best_max_dist = max(old_max_dist, current_max_dist)
 
         new_best_speed = max(old_speed or 0, current_max_speed or 0)
         new_has_loc = 1 if new_best_dist is not None else 0
@@ -106,17 +122,18 @@ def save_flight(plane):
         c.execute("""UPDATE historia SET 
                      last_seen = ?, 
                      min_dist = ?, 
+                     max_dist = ?,
                      max_speed = ?,
                      has_location = ?,
                      route = ?
                      WHERE rowid = ?""", 
-                     (current_last_seen, new_best_dist, new_best_speed, new_has_loc, merged_route_json, row_id))
+                     (current_last_seen, new_best_dist, new_best_max_dist, new_best_speed, new_has_loc, merged_route_json, row_id))
 
     else:
         # NOWY WPIS
         has_loc = 1 if current_min_dist is not None else 0
         
-        c.execute("INSERT INTO historia VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
+        c.execute("INSERT INTO historia (icao, callsign, model, min_dist, max_speed, category, has_location, first_seen, last_seen, route, max_dist) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
             icao,
             plane.get('callsign', 'N/A'),
             plane.get('model', 'Nieznany'),
@@ -126,7 +143,8 @@ def save_flight(plane):
             has_loc,
             int(plane['first_seen']),
             current_last_seen,
-            route_json
+            route_json,
+            current_max_dist
         ))
 
     conn.commit()
@@ -183,7 +201,7 @@ def archive_past_days():
         mil_ghost = ghost_row[0] if ghost_row else None 
         
         # 3. Najdalszy
-        c.execute("SELECT model, min_dist FROM historia WHERE last_seen >= ? AND last_seen < ? AND min_dist < 9000 ORDER BY min_dist DESC LIMIT 1", (day_start, day_end))
+        c.execute("SELECT model, max_dist FROM historia WHERE last_seen >= ? AND last_seen < ? AND max_dist IS NOT NULL AND max_dist > 0 ORDER BY max_dist DESC LIMIT 1", (day_start, day_end))
         f_row = c.fetchone()
         f_model = f_row[0] if f_row else ""
         f_dist = f_row[1] if f_row else 0
@@ -509,13 +527,13 @@ def get_detailed_stats_today():
     scored_models.sort(key=lambda x: (x[2], -x[1]), reverse=True)
     rare_models = [(model, count) for model, count, points in scored_models[:5]]
 
-    #Najdalszy odebrany samolot
+    #Najdalszy odebrany samolot (wg max_dist — najdalsza odległość wykrycia)
     c.execute("""
-        SELECT model, min_dist
+        SELECT model, max_dist
         FROM historia
         WHERE last_seen > ? 
-        AND min_dist < 9000  -- Odrzucamy 9999 (brak lokalizacji)
-        ORDER BY min_dist DESC
+        AND max_dist IS NOT NULL AND max_dist > 0
+        ORDER BY max_dist DESC
         LIMIT 1
     """, (today_midnight,))
 

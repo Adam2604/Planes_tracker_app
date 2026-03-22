@@ -25,7 +25,7 @@ def test_db(tmp_path):
 # ─── Helpery ───────────────────────────────────────────────────────────────────
 
 def _make_plane(icao="ABC123", callsign="LOT1", model="Boeing 737",
-                min_dist=50.0, speed=800, max_speed=850, category=0,
+                min_dist=50.0, max_dist=None, speed=800, max_speed=850, category=0,
                 first_seen=None, last_seen=None, route=None):
     """Tworzy słownik samolotu do testów."""
     now = time.time()
@@ -34,6 +34,7 @@ def _make_plane(icao="ABC123", callsign="LOT1", model="Boeing 737",
         "callsign": callsign,
         "model": model,
         "min_dist": min_dist,
+        "max_dist": max_dist if max_dist is not None else min_dist,
         "speed": speed,
         "max_speed": max_speed,
         "category": category,
@@ -42,20 +43,23 @@ def _make_plane(icao="ABC123", callsign="LOT1", model="Boeing 737",
         "route": route or [[51.0, 17.0], [51.5, 17.5]],
     }
 
+_UNSET = object()  # Sentinel do rozróżnienia "nie podano" od "podano None"
 
 def _insert_flight_raw(db_path, icao="ABC123", callsign="LOT1", model="Boeing 737",
-                        min_dist=50.0, max_speed=800, category=0,
+                        min_dist=50.0, max_dist=_UNSET, max_speed=800, category=0,
                         has_location=1, first_seen=None, last_seen=None, route=None):
     """Wstawia lot bezpośrednio do tabeli historia (bez logiki save_flight)."""
     now = time.time()
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
-    c.execute("INSERT INTO historia VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
+    resolved_max_dist = min_dist if max_dist is _UNSET else max_dist
+    c.execute("INSERT INTO historia (icao, callsign, model, min_dist, max_speed, category, has_location, first_seen, last_seen, route, max_dist) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
         icao, callsign, model, min_dist, max_speed, category,
         has_location,
         int(first_seen or now - 120),
         int(last_seen or now),
         json.dumps(route) if route else None,
+        resolved_max_dist,
     ))
     conn.commit()
     conn.close()
@@ -157,7 +161,7 @@ class TestSaveFlight:
         assert val == 1
 
     def test_has_location_zero_when_no_position(self, test_db):
-        plane = _make_plane(min_dist=9999)
+        plane = _make_plane(min_dist=None, max_dist=None)
         data_base.save_flight(plane)
 
         conn = sqlite3.connect(test_db)
@@ -182,9 +186,9 @@ class TestSaveFlight:
     def test_merge_same_plane_same_day(self, test_db):
         """Ten sam ICAO dzisiaj → aktualizacja, nie duplikat."""
         now = time.time()
-        plane1 = _make_plane(min_dist=100.0, max_speed=500,
+        plane1 = _make_plane(min_dist=100.0, max_dist=200.0, max_speed=500,
                              first_seen=now - 300, last_seen=now - 200)
-        plane2 = _make_plane(min_dist=30.0, max_speed=900,
+        plane2 = _make_plane(min_dist=30.0, max_dist=150.0, max_speed=900,
                              first_seen=now - 100, last_seen=now)
         data_base.save_flight(plane1)
         data_base.save_flight(plane2)
@@ -193,12 +197,13 @@ class TestSaveFlight:
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM historia WHERE icao = 'ABC123'")
         count = c.fetchone()[0]
-        c.execute("SELECT min_dist, max_speed FROM historia WHERE icao = 'ABC123'")
+        c.execute("SELECT min_dist, max_speed, max_dist FROM historia WHERE icao = 'ABC123'")
         row = c.fetchone()
         conn.close()
         assert count == 1
         assert row[0] == 30.0   # min z obu
-        assert row[1] == 900    # max z obu
+        assert row[1] == 900    # max speed z obu
+        assert row[2] == 200.0  # max dist z obu
 
     def test_merge_routes_with_separator(self, test_db):
         """Scalanie tras wstawia None jako separator."""
@@ -593,9 +598,9 @@ class TestGetDetailedStatsToday:
 
     def test_farthest_plane(self, test_db):
         now = time.time()
-        _insert_flight_raw(test_db, icao="F1", model="Długi Lot", min_dist=350.0,
+        _insert_flight_raw(test_db, icao="F1", model="Długi Lot", min_dist=50.0, max_dist=350.0,
                            last_seen=now, first_seen=now - 60)
-        _insert_flight_raw(test_db, icao="F2", model="Krótki Lot", min_dist=10.0,
+        _insert_flight_raw(test_db, icao="F2", model="Krótki Lot", min_dist=10.0, max_dist=80.0,
                            last_seen=now, first_seen=now - 60)
 
         stats = data_base.get_detailed_stats_today()
@@ -603,12 +608,28 @@ class TestGetDetailedStatsToday:
         assert stats["farthest"]["model"] == "Długi Lot"
         assert stats["farthest"]["dist"] == 350.0
 
+    def test_farthest_uses_max_dist_not_min_dist(self, test_db):
+        """Samolot z min_dist=50 ale max_dist=200 powinien pokazać 200 jako najdalszy."""
+        now = time.time()
+        _insert_flight_raw(test_db, icao="X1", model="Daleki Samolot",
+                           min_dist=50.0, max_dist=200.0,
+                           last_seen=now, first_seen=now - 60)
+        _insert_flight_raw(test_db, icao="X2", model="Bliski Samolot",
+                           min_dist=120.0, max_dist=120.0,
+                           last_seen=now, first_seen=now - 60)
+
+        stats = data_base.get_detailed_stats_today()
+        assert stats["farthest"]["model"] == "Daleki Samolot"
+        assert stats["farthest"]["dist"] == 200.0
+
     def test_farthest_ignores_9999(self, test_db):
         """Samoloty bez lokalizacji (dist 9999) nie są najdalszymi."""
         now = time.time()
         _insert_flight_raw(test_db, icao="NO", model="Brak pozycji", min_dist=9999,
+                           max_dist=None, has_location=0,
                            last_seen=now, first_seen=now - 60)
         _insert_flight_raw(test_db, icao="OK", model="Ma pozycję", min_dist=100.0,
+                           max_dist=100.0,
                            last_seen=now, first_seen=now - 60)
 
         stats = data_base.get_detailed_stats_today()

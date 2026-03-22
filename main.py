@@ -11,6 +11,8 @@ import os
 import sys
 from datetime import date, datetime, timedelta
 import logging
+import signal
+import atexit
 
 #Współrzędne anteny
 MY_LAT = 51.978
@@ -355,6 +357,30 @@ def radio_loop():
     finally:
         sdr.close()
 
+cleanup_done = False
+
+def cleanup_on_exit():
+    global cleanup_done
+    if cleanup_done:
+        return
+    cleanup_done = True
+    print("\n" + "="*50)
+    print("Zabezpieczenie: Zapisywanie aktywnych samolotów do bazy przed zamknięciem...")
+    saved_count = 0
+    with planes_lock:
+        for icao, plane in list(planes.items()):
+            try:
+                data_base.save_flight(plane)
+                saved_count += 1
+            except Exception as e:
+                print(f"Błąd zapisu {icao}: {e}")
+    print(f"Zapisano {saved_count} samolotów. Zamknięto bezpiecznie.")
+    print("="*50 + "\n")
+
+def handle_exit(signum, frame):
+    cleanup_on_exit()
+    sys.exit(0)
+
 @app.route('/data')
 def get_data():
     with planes_lock:
@@ -471,6 +497,10 @@ def index():
     return render_template('index.html')
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGINT, handle_exit)
+    signal.signal(signal.SIGTERM, handle_exit)
+    atexit.register(cleanup_on_exit)
+
     load_csv_data()
     data_base.init_db()
     data_base.archive_past_days()

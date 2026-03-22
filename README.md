@@ -37,21 +37,26 @@ A unique algorithm designed to detect aircraft attempting to fly "under the rada
 * **Logic:** The system flags aircraft that broadcast identification signals (like "NATO" or "AIR FORCE") but deliberately suppress their GPS position data.
 * **Alerts:** These "Ghosts" are highlighted on the dashboard even if they cannot be placed on the map.
 
-### 📋 Daily Flight List
-A dedicated subpage serving as a **full register of the current day**. Unlike the main map which displays real-time positions, this list logs **every aircraft detected since midnight**. It allows users to review, sort, and analyze all traffic that has passed through the airspace today, ensuring no flight is missed.
+### 📋 Daily Flight List & Route Replay
+A full register of every aircraft detected since midnight. 
+* **Historical Logging:** Unlike the live map, this list ensures no flight is missed, logging even brief signal interceptions.
+* **Route Visualization:** A new feature allows users to **display the recorded flight path** for any aircraft in the list. By clicking on a flight, the system renders the exact route taken by the plane while it was within the station's range.
 
 #### Daily Flight List - Desktop view
-<img width="1600" alt="image" src="https://github.com/user-attachments/assets/237be765-28ad-4196-9ebb-7996022fa3b1" />
+<img width="1600" alt="image" src="https://github.com/user-attachments/assets/7e7a8f54-9f1d-49a8-b8c1-e6d53c60df8e" />
 
 
-### 📊 Advanced Statistics & Scoring System
-Instead of just counting planes, this project analyzes the *quality* of the traffic.
-* **The "Rarest" Algorithm:** A custom scoring system assigns points to aircraft. Common airliners (A320, B737) get 0 points, while rare catches (Antonovs, Military, Helicopters, LPR) receive high scores.
+### 📊 Advanced Statistics & Radio Range Map
+This module analyzes the performance of the station and the quality of the traffic.
+* **Radio Coverage Heatmap:** The statistics page now features a **Radio Range Map**. It visualizes the actual maximum signal reach of the SDR antenna in every direction, helping to identify terrain obstacles or optimal antenna placement.
+* **The "Rarest" Algorithm:** A custom scoring system assigns points to aircraft. Common airliners get 0 points, while rare catches (Antonovs, Military, LPR) receive high scores.
 * **Daily Archives:** The system automatically saves summaries at midnight, creating a permanent history of the local airspace.
-* **Records:** Tracks the farthest detected signal (distance record) and the most frequent models.
 
 #### Statistics page - Desktop view:
 <img width="1500" alt="image" src="https://github.com/user-attachments/assets/4bce8661-d8c6-4f09-a33d-433ee0fd8db4" /> 
+
+#### Radio range map - Desktop view:
+<img width="1600" alt="image" src="https://github.com/user-attachments/assets/8842c9c6-b040-480b-bfcb-b19daa04c724" />
 
 ### 📱 Dedicated Android App
 To ensure the best possible user experience, the system is accessed via a **custom native Android application written in Kotlin**.

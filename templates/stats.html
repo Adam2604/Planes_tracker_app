@@ -495,8 +495,8 @@
                 for (var i = 0; i < sectors.length; i++) {
                     var s1 = sectors[i];
                     var s2 = sectors[(i + 1) % sectors.length];
-                    var avgDist = (s1.dist + s2.dist) / 2;
-                    if (avgDist < 1) continue;
+                    var maxDistForColor = Math.max(s1.dist, s2.dist);
+                    if (maxDistForColor < 1) continue;
 
                     var d1 = s1.dist > 0 ? s1.dist : 5;
                     var d2 = s2.dist > 0 ? s2.dist : 5;
@@ -509,7 +509,7 @@
                     ], {
                         color: 'transparent',
                         weight: 0,
-                        fillColor: distColor(avgDist),
+                        fillColor: distColor(maxDistForColor),
                         fillOpacity: 0.25,
                         interactive: false
                     }).addTo(rangeMap);

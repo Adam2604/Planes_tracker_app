@@ -482,10 +482,25 @@ def api_range_map():
     if mode_param == "month" and len(date_param) > 7:
         date_param = date_param[:7]
 
-    # Przekaż aktywne samoloty jeśli to dzisiejszy dzień
+    # Przekaż aktywne samoloty jeśli dzisiejszy dzień zawiera się w przedziale
     active = None
     today_str = date.today().strftime("%Y-%m-%d")
+    include_active = False
+    
     if mode_param == 'day' and date_param == today_str:
+        include_active = True
+    elif mode_param == 'week':
+        try:
+            dt = datetime.strptime(date_param, "%Y-%m-%d")
+            start_week = dt - timedelta(days=dt.weekday())
+            end_week = start_week + timedelta(days=6)
+            if start_week.strftime("%Y-%m-%d") <= today_str <= end_week.strftime("%Y-%m-%d"):
+                include_active = True
+        except: pass
+    elif mode_param == 'month' and date_param == today_str[:7]:
+        include_active = True
+
+    if include_active:
         with planes_lock:
             active = [dict(p) for p in planes.values()]
 

@@ -788,8 +788,9 @@ def get_range_data(date_str, mode='day', active_planes=None):
         c.execute("SELECT day_date, range_map FROM daily_stats WHERE day_date >= ? AND day_date <= ?", (s_str, e_str))
         archived_days = set()
         for row in c.fetchall():
-            archived_days.add(row[0])
-            _merge_sectors(row[1])
+            if row[1]:
+                archived_days.add(row[0])
+                _merge_sectors(row[1])
 
         # Pobieramy to, czego jeszcze nie ma w daily_stats (np. dzisiejsze trasy lub wczorajsze przed archiwizacją)
         c.execute("SELECT last_seen, route FROM historia WHERE last_seen >= ? AND last_seen < ? AND route IS NOT NULL", (start_ts, end_ts))
@@ -808,8 +809,8 @@ def get_range_data(date_str, mode='day', active_planes=None):
             except:
                 pass
 
-    # 2. Dodaj aktywne samoloty (jeśli to dzisiejszy dzień)
-    if mode == 'day' and date_str == today_str and active_planes:
+    # 2. Dodaj aktywne samoloty 
+    if active_planes:
         for plane in active_planes:
             if "lat" in plane and "lon" in plane:
                 _process_point(plane["lat"], plane["lon"])

@@ -39,8 +39,14 @@ def init_db():
                     farthest_dist REAL,
                     farthest_model TEXT,
                     rarest_model TEXT, 
-                    top_model TEXT
+                    top_model TEXT,
+                    range_map TEXT
                 )''')
+    # Migracja — dodanie kolumny range_map do daily_stats
+    try:
+        c.execute("ALTER TABLE daily_stats ADD COLUMN range_map TEXT")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     conn.close()
 
@@ -173,6 +179,28 @@ def archive_past_days():
     
     today_str = date.today().strftime("%Y-%m-%d")
     
+    import math
+    MY_LAT = 51.978
+    MY_LON = 17.498
+    NUM_SECTORS = 36
+    SECTOR_SIZE = 360 / NUM_SECTORS
+
+    def _haversine(lat1, lon1, lat2, lon2):
+        R = 6371
+        p1, p2 = math.radians(lat1), math.radians(lat2)
+        dp = math.radians(lat2 - lat1)
+        dl = math.radians(lon2 - lon1)
+        a = math.sin(dp/2)**2 + math.cos(p1)*math.cos(p2)*math.sin(dl/2)**2
+        return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
+
+    def _bearing(lat1, lon1, lat2, lon2):
+        p1, p2 = math.radians(lat1), math.radians(lat2)
+        dl = math.radians(lon2 - lon1)
+        x = math.sin(dl) * math.cos(p2)
+        y = math.cos(p1)*math.sin(p2) - math.sin(p1)*math.cos(p2)*math.cos(dl)
+        brng = math.degrees(math.atan2(x, y))
+        return (brng + 360) % 360
+
     c.execute("SELECT DISTINCT date(last_seen, 'unixepoch', 'localtime') as d FROM historia WHERE d != ?", (today_str,))
     days_to_archive = [row[0] for row in c.fetchall()]
     
@@ -233,9 +261,34 @@ def archive_past_days():
         scored.sort(key=lambda x: (x[2], -x[1]), reverse=True)
         rare_json = json.dumps([(x[0], x[1]) for x in scored[:5]])
 
+        day_sectors = [0.0] * NUM_SECTORS
+
+        def _process_point(lat, lon):
+            dist = _haversine(MY_LAT, MY_LON, lat, lon)
+            if dist < 1 or dist > 800:
+                return
+            brng = _bearing(MY_LAT, MY_LON, lat, lon)
+            idx = int(brng / SECTOR_SIZE) % NUM_SECTORS
+            if dist > day_sectors[idx]:
+                day_sectors[idx] = dist
+
+        c.execute("SELECT route FROM historia WHERE last_seen >= ? AND last_seen < ? AND route IS NOT NULL", (day_start, day_end))
+        for r_row in c.fetchall():
+            if not r_row[0]: continue
+            try:
+                route = json.loads(r_row[0])
+                for point in route:
+                    if point is None: continue
+                    if isinstance(point, list) and len(point) == 2:
+                        _process_point(point[0], point[1])
+            except:
+                pass
+        
+        range_map_json = json.dumps([round(d, 1) for d in day_sectors])
+
         # Zapis do bazy
-        c.execute("INSERT INTO daily_stats VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                  (day_str, total, close, light, mil_ghost, f_dist, f_model, rare_json, top_json))
+        c.execute("INSERT INTO daily_stats (day_date, total_flights, close_flights, light_flights, military_ghost_found, farthest_dist, farthest_model, rarest_model, top_model, range_map) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                  (day_str, total, close, light, mil_ghost, f_dist, f_model, rare_json, top_json, range_map_json))
         
     conn.commit()
     conn.close()
@@ -667,46 +720,93 @@ def get_range_data(date_str, mode='day', active_planes=None):
 
     today_str = date.today().strftime("%Y-%m-%d")
 
+    def _merge_sectors(saved_map_json):
+        if saved_map_json:
+            try:
+                saved = json.loads(saved_map_json)
+                for i in range(NUM_SECTORS):
+                    if i < len(saved) and saved[i] > sectors[i]:
+                        sectors[i] = saved[i]
+            except:
+                pass
+
     if mode == 'day':
         if date_str == today_str:
-            # Dzisiaj — dane z bazy + aktywne samoloty
+            # Dzisiaj — dane z bazy wg aktualnych godzin + aktywne samoloty
             today_midnight = datetime.combine(date.today(), datetime.min.time()).timestamp()
             c.execute("SELECT route FROM historia WHERE last_seen > ? AND route IS NOT NULL", (today_midnight,))
+            for row in c.fetchall():
+                if not row[0]: continue
+                try:
+                    route = json.loads(row[0])
+                    for point in route:
+                        if point is None: continue
+                        if isinstance(point, list) and len(point) == 2:
+                            _process_point(point[0], point[1])
+                except:
+                    pass
         else:
-            day_start = datetime.strptime(date_str, "%Y-%m-%d").timestamp()
-            day_end = day_start + 86400
-            c.execute("SELECT route FROM historia WHERE last_seen >= ? AND last_seen < ? AND route IS NOT NULL", (day_start, day_end))
-    elif mode == 'week':
-        dt = datetime.strptime(date_str, "%Y-%m-%d")
-        start_week = dt - timedelta(days=dt.weekday())
-        end_week = start_week + timedelta(days=7)
-        c.execute("SELECT route FROM historia WHERE last_seen >= ? AND last_seen < ? AND route IS NOT NULL",
-                  (start_week.timestamp(), end_week.timestamp()))
-    elif mode == 'month':
-        import calendar
-        parts = date_str.split('-')
-        y, m = int(parts[0]), int(parts[1])
-        last_day = calendar.monthrange(y, m)[1]
-        s = datetime(y, m, 1).timestamp()
-        e = datetime(y, m, last_day, 23, 59, 59).timestamp()
-        c.execute("SELECT route FROM historia WHERE last_seen >= ? AND last_seen < ? AND route IS NOT NULL", (s, e))
+            # Wcześniejszy dzień - pobieramy z daily_stats, jeżeli brak to próbujemy z historia (jeśli to wczoraj i jeszcze nie usunięto)
+            c.execute("SELECT range_map FROM daily_stats WHERE day_date = ?", (date_str,))
+            stats_row = c.fetchone()
+            if stats_row and stats_row[0]:
+                _merge_sectors(stats_row[0])
+            else:
+                day_start = datetime.strptime(date_str, "%Y-%m-%d").timestamp()
+                day_end = day_start + 86400
+                c.execute("SELECT route FROM historia WHERE last_seen >= ? AND last_seen < ? AND route IS NOT NULL", (day_start, day_end))
+                for row in c.fetchall():
+                    if not row[0]: continue
+                    try:
+                        route = json.loads(row[0])
+                        for point in route:
+                            if point is None: continue
+                            if isinstance(point, list) and len(point) == 2:
+                                _process_point(point[0], point[1])
+                    except:
+                        pass
+    elif mode == 'week' or mode == 'month':
+        if mode == 'week':
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            start_week = dt - timedelta(days=dt.weekday())
+            end_week = start_week + timedelta(days=6)
+            s_str = start_week.strftime("%Y-%m-%d")
+            e_str = end_week.strftime("%Y-%m-%d")
+            start_ts = start_week.timestamp()
+            end_ts = (end_week + timedelta(days=1)).timestamp()
+        else: # month
+            import calendar
+            parts = date_str.split('-')
+            y, m = int(parts[0]), int(parts[1])
+            last_day = calendar.monthrange(y, m)[1]
+            s_str = f"{y}-{m:02d}-01"
+            e_str = f"{y}-{m:02d}-{last_day}"
+            start_ts = datetime(y, m, 1).timestamp()
+            end_ts = datetime(y, m, last_day, 23, 59, 59).timestamp()
 
-    rows = c.fetchall()
-    conn.close()
+        # Pobieramy zarchiwizowane mapy zasięgu 
+        c.execute("SELECT day_date, range_map FROM daily_stats WHERE day_date >= ? AND day_date <= ?", (s_str, e_str))
+        archived_days = set()
+        for row in c.fetchall():
+            archived_days.add(row[0])
+            _merge_sectors(row[1])
 
-    # Parsowanie tras z bazy
-    for row in rows:
-        if not row[0]:
-            continue
-        try:
-            route = json.loads(row[0])
-            for point in route:
-                if point is None:
-                    continue
-                if isinstance(point, list) and len(point) == 2:
-                    _process_point(point[0], point[1])
-        except:
-            continue
+        # Pobieramy to, czego jeszcze nie ma w daily_stats (np. dzisiejsze trasy lub wczorajsze przed archiwizacją)
+        c.execute("SELECT last_seen, route FROM historia WHERE last_seen >= ? AND last_seen < ? AND route IS NOT NULL", (start_ts, end_ts))
+        for row in c.fetchall():
+            if not row[1]: continue
+            row_date = datetime.fromtimestamp(row[0]).strftime("%Y-%m-%d")
+            # Nie przetwarzaj tras z dni, które już mają kompletną zapisaną mapę zasięgu
+            if row_date in archived_days:
+                continue
+            try:
+                route = json.loads(row[1])
+                for point in route:
+                    if point is None: continue
+                    if isinstance(point, list) and len(point) == 2:
+                        _process_point(point[0], point[1])
+            except:
+                pass
 
     # 2. Dodaj aktywne samoloty (jeśli to dzisiejszy dzień)
     if mode == 'day' and date_str == today_str and active_planes:
@@ -722,6 +822,7 @@ def get_range_data(date_str, mode='day', active_planes=None):
             "dist": round(sectors[i], 1)
         })
 
+    conn.close()
     return result
 
 def delete_old_data():

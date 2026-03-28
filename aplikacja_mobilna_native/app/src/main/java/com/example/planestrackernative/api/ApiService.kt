@@ -29,4 +29,10 @@ interface ApiService {
         @Query("date") date: String,
         @Query("mode") mode: String
     ): StatsDetailed
+
+    @GET("/api/range_map")
+    suspend fun getRangeMap(
+        @Query("date") date: String,
+        @Query("mode") mode: String
+    ): RangeMapResponse
 }

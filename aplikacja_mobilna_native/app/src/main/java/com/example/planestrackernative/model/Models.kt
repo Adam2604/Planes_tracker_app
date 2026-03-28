@@ -57,3 +57,18 @@ data class FlightListItem(
     val speed: Int = 0,
     @SerializedName("has_route") val hasRoute: Boolean = false
 )
+
+data class RangeMapResponse(
+    val sectors: List<RangeMapSector> = emptyList(),
+    val antenna: AntennaInfo = AntennaInfo()
+)
+
+data class RangeMapSector(
+    val angle: Double = 0.0,
+    val dist: Double = 0.0
+)
+
+data class AntennaInfo(
+    val lat: Double = 51.978,
+    val lon: Double = 17.498
+)

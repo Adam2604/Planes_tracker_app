@@ -33,4 +33,10 @@
     <string name="analyzing_sky">Analizuję niebo…</string>
     <string name="yes_alert">TAK! ⚠️</string>
     <string name="no_alert">NIE</string>
+    <string name="range_map_title">📡 Zasięg Radiowy</string>
+    <string name="range_no_data">Brak danych o zasięgu</string>
+    <string name="range_legend_blue">&lt; 100 km</string>
+    <string name="range_legend_green">100–200 km</string>
+    <string name="range_legend_orange">200–350 km</string>
+    <string name="range_legend_red">&gt; 350 km</string>
 </resources>

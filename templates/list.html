@@ -119,6 +119,33 @@
             font-size: 12px;
         }
 
+        th.sortable {
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.2s, color 0.2s;
+            position: relative;
+            padding-right: 22px;
+        }
+
+        th.sortable:hover {
+            background: #3a3a3a;
+            color: #66BB6A;
+        }
+
+        th.sortable .sort-arrow {
+            font-size: 10px;
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #666;
+            transition: color 0.2s;
+        }
+
+        th.sortable.active .sort-arrow {
+            color: #4CAF50;
+        }
+
         td {
             padding: 12px;
             border-bottom: 1px solid #444;
@@ -246,21 +273,21 @@
     <table class="flight-table">
         <thead>
             <tr>
-                <th>{% if date_from != date_to %}Data / Godz.{% else %}Godz.{% endif %}</th>
-                <th>Samolot</th>
-                <th>Dystans</th>
+                <th class="sortable" data-sort="time" onclick="sortTable('time')">{% if date_from != date_to %}Data / Godz.{% else %}Godz.{% endif %}<span class="sort-arrow">▼</span></th>
+                <th class="sortable" data-sort="model" onclick="sortTable('model')">Samolot<span class="sort-arrow">▲▼</span></th>
+                <th class="sortable" data-sort="dist" onclick="sortTable('dist')">Dystans<span class="sort-arrow">▲▼</span></th>
                 <th>Trasa</th>
             </tr>
         </thead>
         <tbody>
             {% for f in flights %}
             <tr>
-                <td style="color: #aaa;">{{ f.time }}</td>
+                <td style="color: #aaa;" data-sort-value="{{ f.rowid }}">{{ f.time }}</td>
                 <td>
                     <div style="font-weight: bold; margin-bottom: 4px;">{{ f.model }}</div>
                     <span class="icao-tag">{{ f.icao }}</span>
                 </td>
-                <td>
+                <td data-sort-value="{{ f.dist }}">
                     <span class="dist-tag">
                         {% if f.dist >= 9999 %}
                         -
@@ -296,6 +323,63 @@
     </div>
 
     <script>
+        // === Sortowanie tabeli ===
+        var currentSort = 'time';
+        var currentDir = 'desc';  // domyślnie czas malejąco (najnowsze na górze)
+
+        function sortTable(column) {
+            if (currentSort === column) {
+                currentDir = currentDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort = column;
+                currentDir = column === 'dist' ? 'asc' : (column === 'model' ? 'asc' : 'desc');
+            }
+
+            var tbody = document.querySelector('.flight-table tbody');
+            var rows = Array.from(tbody.querySelectorAll('tr'));
+
+            rows.sort(function(a, b) {
+                var valA, valB;
+
+                if (column === 'time') {
+                    // Sortuj po rowid (data-sort-value) — odpowiada kolejności chronologicznej
+                    valA = parseInt(a.children[0].getAttribute('data-sort-value')) || 0;
+                    valB = parseInt(b.children[0].getAttribute('data-sort-value')) || 0;
+                } else if (column === 'model') {
+                    valA = (a.children[1].querySelector('div') || {}).textContent || '';
+                    valB = (b.children[1].querySelector('div') || {}).textContent || '';
+                    valA = valA.trim().toLowerCase();
+                    valB = valB.trim().toLowerCase();
+                } else if (column === 'dist') {
+                    valA = parseFloat(a.children[2].getAttribute('data-sort-value')) || 9999;
+                    valB = parseFloat(b.children[2].getAttribute('data-sort-value')) || 9999;
+                }
+
+                var cmp;
+                if (typeof valA === 'string') {
+                    cmp = valA.localeCompare(valB, 'pl');
+                } else {
+                    cmp = valA - valB;
+                }
+
+                return currentDir === 'asc' ? cmp : -cmp;
+            });
+
+            rows.forEach(function(row) { tbody.appendChild(row); });
+
+            // Aktualizacja strzałek
+            document.querySelectorAll('th.sortable').forEach(function(th) {
+                var arrow = th.querySelector('.sort-arrow');
+                if (th.getAttribute('data-sort') === column) {
+                    th.classList.add('active');
+                    arrow.textContent = currentDir === 'asc' ? '▲' : '▼';
+                } else {
+                    th.classList.remove('active');
+                    arrow.textContent = '▲▼';
+                }
+            });
+        }
+
         var routeMap = null;
         var routeLayers = [];
         var activeBtn = null;

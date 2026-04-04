@@ -143,7 +143,7 @@
         .filter-chip:hover {
             border-color: #888;
             color: #eee;
-            background: rgba(255,255,255,0.04);
+            background: rgba(255, 255, 255, 0.04);
         }
 
         .filter-chip.active {
@@ -181,11 +181,11 @@
             border-radius: 11px;
             font-size: 11px;
             font-weight: bold;
-            background: rgba(255,255,255,0.12);
+            background: rgba(255, 255, 255, 0.12);
         }
 
         .filter-chip.active .filter-count {
-            background: rgba(255,255,255,0.25);
+            background: rgba(255, 255, 255, 0.25);
         }
 
         .result-info {
@@ -212,6 +212,33 @@
             text-align: left;
             text-transform: uppercase;
             font-size: 12px;
+        }
+
+        th.sortable {
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.2s, color 0.2s;
+            position: relative;
+            padding-right: 22px;
+        }
+
+        th.sortable:hover {
+            background: #3a3a3a;
+            color: #66BB6A;
+        }
+
+        th.sortable .sort-arrow {
+            font-size: 10px;
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #666;
+            transition: color 0.2s;
+        }
+
+        th.sortable.active .sort-arrow {
+            color: #4CAF50;
         }
 
         td {
@@ -392,18 +419,18 @@
     <table class="flight-table">
         <thead>
             <tr>
-                <th>{% if date_from != date_to %}Data / Godz.{% else %}Godz.{% endif %}</th>
-                <th>Samolot</th>
-                <th>Dystans</th>
+                <th class="sortable" data-sort="time" onclick="sortTable('time')">{% if date_from != date_to %}Data /
+                    Godz.{% else %}Godz.{% endif %}<span class="sort-arrow">▼</span></th>
+                <th class="sortable" data-sort="model" onclick="sortTable('model')">Samolot<span
+                        class="sort-arrow">▲▼</span></th>
+                <th class="sortable" data-sort="dist" onclick="sortTable('dist')">Dystans<span
+                        class="sort-arrow">▲▼</span></th>
                 <th>Trasa</th>
             </tr>
         </thead>
         <tbody id="flights-body">
             {% for f in flights %}
-            <tr class="flight-row"
-                data-category="{{ f.category }}"
-                data-military="{{ f.is_military|int }}"
-                data-dist="{{ f.dist }}">
+            <tr>
                 <td style="color: #aaa;">{{ f.time }}</td>
                 <td>
                     <div style="font-weight: bold; margin-bottom: 4px;">
@@ -417,7 +444,7 @@
                     </div>
                     <span class="icao-tag">{{ f.icao }}</span>
                 </td>
-                <td>
+                <td data-sort-value="{{ f.dist }}">
                     <span class="dist-tag">
                         {% if f.dist >= 9999 %}
                         -
@@ -458,92 +485,6 @@
     </div>
 
     <script>
-        // ── Filtr typu samolotu ──
-
-        var activeFilters = new Set(); // 'military', 'light', 'close'
-
-        function toggleFilter(btn) {
-            var filterType = btn.getAttribute('data-filter');
-            if (activeFilters.has(filterType)) {
-                activeFilters.delete(filterType);
-                btn.classList.remove('active');
-            } else {
-                activeFilters.add(filterType);
-                btn.classList.add('active');
-            }
-            applyFilters();
-        }
-
-        function applyFilters() {
-            var rows = document.querySelectorAll('.flight-row');
-            var visibleCount = 0;
-            var totalCount = rows.length;
-
-            rows.forEach(function(row) {
-                if (activeFilters.size === 0) {
-                    // Brak aktywnych filtrów — pokaż wszystko
-                    row.classList.remove('hidden-by-filter');
-                    visibleCount++;
-                    return;
-                }
-
-                var show = false;
-                var isMilitary = row.getAttribute('data-military') === '1';
-                var isLight = row.getAttribute('data-category') === '1';
-                var dist = parseFloat(row.getAttribute('data-dist'));
-                var isClose = (dist < 5.0 && dist < 9999);
-
-                // Logika OR — lot pasuje jeśli spełnia KTÓRYKOLWIEK aktywny filtr
-                if (activeFilters.has('military') && isMilitary) show = true;
-                if (activeFilters.has('light') && isLight) show = true;
-                if (activeFilters.has('close') && isClose) show = true;
-
-                if (show) {
-                    row.classList.remove('hidden-by-filter');
-                    visibleCount++;
-                } else {
-                    row.classList.add('hidden-by-filter');
-                }
-            });
-
-            // Informacja o ilości wyników
-            var infoEl = document.getElementById('result-info');
-            var noResultsEl = document.getElementById('no-filter-results');
-
-            if (activeFilters.size === 0) {
-                infoEl.textContent = '';
-                noResultsEl.style.display = 'none';
-            } else {
-                infoEl.textContent = 'Wyświetlono ' + visibleCount + ' z ' + totalCount + ' lotów';
-                noResultsEl.style.display = (visibleCount === 0) ? 'block' : 'none';
-            }
-        }
-
-        // Policz ilość lotów w każdej kategorii na starcie
-        function updateFilterCounts() {
-            var rows = document.querySelectorAll('.flight-row');
-            var countMilitary = 0, countLight = 0, countClose = 0;
-
-            rows.forEach(function(row) {
-                if (row.getAttribute('data-military') === '1') countMilitary++;
-                if (row.getAttribute('data-category') === '1') countLight++;
-                var dist = parseFloat(row.getAttribute('data-dist'));
-                if (dist < 5.0 && dist < 9999) countClose++;
-            });
-
-            var el;
-            el = document.getElementById('count-military');
-            if (el) el.textContent = countMilitary;
-            el = document.getElementById('count-light');
-            if (el) el.textContent = countLight;
-            el = document.getElementById('count-close');
-            if (el) el.textContent = countClose;
-        }
-
-        updateFilterCounts();
-
-        // ── Modal mapy trasy ──
-
         var routeMap = null;
         var routeLayers = [];
         var activeBtn = null;

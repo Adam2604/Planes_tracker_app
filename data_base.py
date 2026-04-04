@@ -29,7 +29,7 @@ def init_db():
         pass  # Kolumna już istnieje
     c.execute("CREATE INDEX IF NOT EXISTS idx_icao_time ON historia (icao, last_seen)")
     
-    # Tabela archiwum
+    # Tabela archiwum statystyk dziennych
     c.execute('''CREATE TABLE IF NOT EXISTS daily_stats (
                     day_date TEXT PRIMARY KEY,
                     total_flights INTEGER,
@@ -47,6 +47,16 @@ def init_db():
         c.execute("ALTER TABLE daily_stats ADD COLUMN range_map TEXT")
     except sqlite3.OperationalError:
         pass
+
+    # Tabela trwałego archiwum indywidualnych lotów (nie kasuje się po 48h)
+    c.execute('''CREATE TABLE IF NOT EXISTS flights_archive (
+                    icao TEXT, callsign TEXT, model TEXT, min_dist REAL,
+                    max_speed INTEGER, category INTEGER, has_location INTEGER,
+                    first_seen INTEGER, last_seen INTEGER,
+                    route TEXT, max_dist REAL
+                )''')
+    c.execute("CREATE INDEX IF NOT EXISTS idx_archive_last_seen ON flights_archive (last_seen)")
+
     conn.commit()
     conn.close()
 
@@ -286,9 +296,15 @@ def archive_past_days():
         
         range_map_json = json.dumps([round(d, 1) for d in day_sectors])
 
-        # Zapis do bazy
+        # Zapis statystyk do bazy
         c.execute("INSERT INTO daily_stats (day_date, total_flights, close_flights, light_flights, military_ghost_found, farthest_dist, farthest_model, rarest_model, top_model, range_map) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                   (day_str, total, close, light, mil_ghost, f_dist, f_model, rare_json, top_json, range_map_json))
+
+        # Archiwizacja indywidualnych lotów do trwałej tabeli
+        c.execute("""INSERT INTO flights_archive (icao, callsign, model, min_dist, max_speed, category, has_location, first_seen, last_seen, route, max_dist)
+                     SELECT icao, callsign, model, min_dist, max_speed, category, has_location, first_seen, last_seen, route, max_dist
+                     FROM historia
+                     WHERE last_seen >= ? AND last_seen < ?""", (day_start, day_end))
         
     conn.commit()
     conn.close()
@@ -627,15 +643,29 @@ def get_flights_list(date_from=None, date_to=None):
 
     multi_day = (date_from != date_to)
     
+    # Łączymy dane z trwałego archiwum (flights_archive) i bieżącej tabeli (historia).
+    # flights_archive zawiera permanentnie zapisane loty z przeszłości,
+    # historia zawiera tylko ostatnie ~48h (kasowane przez delete_old_data).
+    # Aby uniknąć duplikatów, z historia pobieramy tylko loty z dni
+    # które NIE zostały jeszcze zarchiwizowane w daily_stats.
     c.execute("""
-        SELECT rowid, icao, model, last_seen, min_dist, max_speed, route 
-        FROM historia 
+        SELECT rowid, icao, model, last_seen, min_dist, max_speed, route, category, 'archive' as source
+        FROM flights_archive
         WHERE last_seen >= ? AND last_seen < ?
+        UNION ALL
+        SELECT rowid, icao, model, last_seen, min_dist, max_speed, route, category, 'historia' as source
+        FROM historia
+        WHERE last_seen >= ? AND last_seen < ?
+        AND date(last_seen, 'unixepoch', 'localtime') NOT IN (
+            SELECT day_date FROM daily_stats
+        )
         ORDER BY last_seen DESC
-    """, (start_ts, end_ts))
+    """, (start_ts, end_ts, start_ts, end_ts))
     
     rows = c.fetchall()
     conn.close()
+
+    military_keywords = ['Military', 'Air Force', 'NATO', 'Army', 'Polish Air Force', 'Navy', 'Police', 'LPR']
     
     results = []
     for row in rows:
@@ -650,24 +680,45 @@ def get_flights_list(date_from=None, date_to=None):
         raw_dist = row[4]
         safe_dist = 9999.0 if raw_dist is None else round(raw_dist, 1)
 
+        # Kategorie do filtrowania
+        category = row[7] if row[7] else 0
+        model_text = row[2] or ''
+        is_military = any(kw.lower() in model_text.lower() for kw in military_keywords)
+
         results.append({
             "rowid": row[0],
             "icao": row[1],
             "model": row[2],
             "time": time_str,
-            "dist": safe_dist, #Dla frontendów listowych wspierających "9999" jako ukrycie (Android) i list.html
+            "dist": safe_dist,
             "speed": row[5],
-            "has_route": has_route
+            "has_route": has_route,
+            "category": category,
+            "is_military": is_military,
+            "source": row[8]  # 'archive' lub 'historia'
         })
         
     return results
 
-def get_flight_route(rowid):
-    """Pobiera trasę lotu z bazy danych po rowid"""
+def get_flight_route(rowid, source='historia'):
+    """Pobiera trasę lotu z bazy danych po rowid.
+    source: 'historia' (bieżące dane) lub 'archive' (trwałe archiwum)"""
     conn = sqlite3.connect(DB_NAME, timeout = 10)
     c = conn.cursor()
-    c.execute("SELECT icao, route FROM historia WHERE rowid = ?", (rowid,))
+    
+    # Szukaj w podanej tabeli
+    table = 'flights_archive' if source == 'archive' else 'historia'
+    c.execute(f"SELECT icao, route FROM {table} WHERE rowid = ?", (rowid,))
     row = c.fetchone()
+    
+    # Fallback — jeśli nie znaleziono, sprawdź drugą tabelę
+    if not row or not row[1]:
+        other_table = 'historia' if source == 'archive' else 'flights_archive'
+        c.execute(f"SELECT icao, route FROM {other_table} WHERE rowid = ?", (rowid,))
+        row2 = c.fetchone()
+        if row2 and row2[1]:
+            row = row2
+    
     conn.close()
     if not row or not row[1]:
         return None, []

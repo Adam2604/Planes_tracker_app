@@ -418,7 +418,8 @@ def get_route(icao):
 
 @app.route('/route/history/<int:rowid>')
 def get_route_history(rowid):
-    icao, route = data_base.get_flight_route(rowid)
+    source = request.args.get('source', 'historia')
+    icao, route = data_base.get_flight_route(rowid, source)
     if not icao:
         return jsonify({"icao": None, "route": []})
     return jsonify({"icao": icao, "route": route})

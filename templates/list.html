@@ -47,7 +47,7 @@
             justify-content: center;
             gap: 12px;
             flex-wrap: wrap;
-            margin-bottom: 24px;
+            margin-bottom: 12px;
             background: #2a2a2a;
             padding: 14px 20px;
             border-radius: 10px;
@@ -101,6 +101,101 @@
             transform: scale(0.96);
         }
 
+        /* ── Pasek filtrów typu samolotu ── */
+        .type-filters {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 24px;
+            background: #2a2a2a;
+            padding: 12px 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .type-filters .filter-label {
+            color: #888;
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-right: 4px;
+        }
+
+        .filter-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 16px;
+            border-radius: 20px;
+            border: 1.5px solid #555;
+            background: transparent;
+            color: #bbb;
+            font-size: 13px;
+            font-family: 'Segoe UI', sans-serif;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            user-select: none;
+        }
+
+        .filter-chip:hover {
+            border-color: #888;
+            color: #eee;
+            background: rgba(255,255,255,0.04);
+        }
+
+        .filter-chip.active {
+            border-color: transparent;
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .filter-chip.active[data-filter="military"] {
+            background: linear-gradient(135deg, #b71c1c, #d32f2f);
+            box-shadow: 0 2px 12px rgba(211, 47, 47, 0.35);
+        }
+
+        .filter-chip.active[data-filter="light"] {
+            background: linear-gradient(135deg, #1565C0, #1E88E5);
+            box-shadow: 0 2px 12px rgba(30, 136, 229, 0.35);
+        }
+
+        .filter-chip.active[data-filter="close"] {
+            background: linear-gradient(135deg, #2E7D32, #43A047);
+            box-shadow: 0 2px 12px rgba(67, 160, 71, 0.35);
+        }
+
+        .filter-chip .chip-icon {
+            font-size: 15px;
+        }
+
+        .filter-count {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 22px;
+            height: 22px;
+            padding: 0 6px;
+            border-radius: 11px;
+            font-size: 11px;
+            font-weight: bold;
+            background: rgba(255,255,255,0.12);
+        }
+
+        .filter-chip.active .filter-count {
+            background: rgba(255,255,255,0.25);
+        }
+
+        .result-info {
+            text-align: center;
+            color: #777;
+            font-size: 13px;
+            margin-bottom: 16px;
+            transition: opacity 0.3s;
+        }
+
         .flight-table {
             width: 100%;
             border-collapse: collapse;
@@ -132,6 +227,11 @@
             background-color: #303030;
         }
 
+        /* Ukrywanie wierszy przez filtr */
+        tr.flight-row.hidden-by-filter {
+            display: none;
+        }
+
         .icao-tag {
             background: #444;
             padding: 2px 6px;
@@ -144,6 +244,28 @@
         .dist-tag {
             font-weight: bold;
             color: #4CAF50;
+        }
+
+        .type-badge {
+            display: inline-block;
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 6px;
+            vertical-align: middle;
+        }
+
+        .type-badge.military {
+            background: rgba(211, 47, 47, 0.25);
+            color: #ef5350;
+            border: 1px solid rgba(211, 47, 47, 0.3);
+        }
+
+        .type-badge.light {
+            background: rgba(30, 136, 229, 0.2);
+            color: #42A5F5;
+            border: 1px solid rgba(30, 136, 229, 0.3);
         }
 
         .route-btn {
@@ -220,6 +342,12 @@
         #map-close:hover {
             background: #d32f2f;
         }
+
+        .no-results-msg {
+            text-align: center;
+            margin-top: 50px;
+            color: #666;
+        }
     </style>
 </head>
 
@@ -235,6 +363,7 @@
         {% endif %}
     </h1>
 
+    <!-- Filtr zakresu dat -->
     <form class="filter-bar" method="GET" action="/list">
         <label for="date_from">Od:</label>
         <input type="date" id="date_from" name="date_from" value="{{ date_from }}">
@@ -242,6 +371,23 @@
         <input type="date" id="date_to" name="date_to" value="{{ date_to }}">
         <button type="submit" class="filter-btn">🔍 Filtruj</button>
     </form>
+
+    <!-- Filtr typu samolotu -->
+    {% if flights|length > 0 %}
+    <div class="type-filters" id="type-filters">
+        <span class="filter-label">Pokaż:</span>
+        <button type="button" class="filter-chip" data-filter="military" onclick="toggleFilter(this)">
+            <span class="chip-icon">🎖️</span> Wojskowe <span class="filter-count" id="count-military">0</span>
+        </button>
+        <button type="button" class="filter-chip" data-filter="light" onclick="toggleFilter(this)">
+            <span class="chip-icon">🛩️</span> Lekkie <span class="filter-count" id="count-light">0</span>
+        </button>
+        <button type="button" class="filter-chip" data-filter="close" onclick="toggleFilter(this)">
+            <span class="chip-icon">📍</span> &lt;5 km <span class="filter-count" id="count-close">0</span>
+        </button>
+    </div>
+    <div class="result-info" id="result-info"></div>
+    {% endif %}
 
     <table class="flight-table">
         <thead>
@@ -252,12 +398,23 @@
                 <th>Trasa</th>
             </tr>
         </thead>
-        <tbody>
+        <tbody id="flights-body">
             {% for f in flights %}
-            <tr>
+            <tr class="flight-row"
+                data-category="{{ f.category }}"
+                data-military="{{ f.is_military|int }}"
+                data-dist="{{ f.dist }}">
                 <td style="color: #aaa;">{{ f.time }}</td>
                 <td>
-                    <div style="font-weight: bold; margin-bottom: 4px;">{{ f.model }}</div>
+                    <div style="font-weight: bold; margin-bottom: 4px;">
+                        {{ f.model }}
+                        {% if f.is_military %}
+                        <span class="type-badge military">Wojskowy</span>
+                        {% endif %}
+                        {% if f.category == 1 %}
+                        <span class="type-badge light">Lekki</span>
+                        {% endif %}
+                    </div>
                     <span class="icao-tag">{{ f.icao }}</span>
                 </td>
                 <td>
@@ -272,7 +429,7 @@
                 <td>
                     {% if f.has_route %}
                     <button class="route-btn"
-                        onclick="showRoute({{ f.rowid }}, '{{ f.icao }}', '{{ f.model }}')">🗺️</button>
+                        onclick="showRoute({{ f.rowid }}, '{{ f.source }}', '{{ f.icao }}', '{{ f.model }}')">🗺️</button>
                     {% else %}
                     <span style="color: #555;">—</span>
                     {% endif %}
@@ -283,10 +440,15 @@
     </table>
 
     {% if flights|length == 0 %}
-    <div style="text-align: center; margin-top: 50px; color: #666;">
+    <div class="no-results-msg">
         Brak zarejestrowanych lotów w wybranym zakresie dat.
     </div>
     {% endif %}
+
+    <!-- Informacja o pustym filtrze (ukryta domyślnie) -->
+    <div class="no-results-msg" id="no-filter-results" style="display: none;">
+        Żaden lot nie pasuje do wybranych filtrów.
+    </div>
 
     <!-- Modal z mapą trasy -->
     <div id="map-overlay">
@@ -296,11 +458,97 @@
     </div>
 
     <script>
+        // ── Filtr typu samolotu ──
+
+        var activeFilters = new Set(); // 'military', 'light', 'close'
+
+        function toggleFilter(btn) {
+            var filterType = btn.getAttribute('data-filter');
+            if (activeFilters.has(filterType)) {
+                activeFilters.delete(filterType);
+                btn.classList.remove('active');
+            } else {
+                activeFilters.add(filterType);
+                btn.classList.add('active');
+            }
+            applyFilters();
+        }
+
+        function applyFilters() {
+            var rows = document.querySelectorAll('.flight-row');
+            var visibleCount = 0;
+            var totalCount = rows.length;
+
+            rows.forEach(function(row) {
+                if (activeFilters.size === 0) {
+                    // Brak aktywnych filtrów — pokaż wszystko
+                    row.classList.remove('hidden-by-filter');
+                    visibleCount++;
+                    return;
+                }
+
+                var show = false;
+                var isMilitary = row.getAttribute('data-military') === '1';
+                var isLight = row.getAttribute('data-category') === '1';
+                var dist = parseFloat(row.getAttribute('data-dist'));
+                var isClose = (dist < 5.0 && dist < 9999);
+
+                // Logika OR — lot pasuje jeśli spełnia KTÓRYKOLWIEK aktywny filtr
+                if (activeFilters.has('military') && isMilitary) show = true;
+                if (activeFilters.has('light') && isLight) show = true;
+                if (activeFilters.has('close') && isClose) show = true;
+
+                if (show) {
+                    row.classList.remove('hidden-by-filter');
+                    visibleCount++;
+                } else {
+                    row.classList.add('hidden-by-filter');
+                }
+            });
+
+            // Informacja o ilości wyników
+            var infoEl = document.getElementById('result-info');
+            var noResultsEl = document.getElementById('no-filter-results');
+
+            if (activeFilters.size === 0) {
+                infoEl.textContent = '';
+                noResultsEl.style.display = 'none';
+            } else {
+                infoEl.textContent = 'Wyświetlono ' + visibleCount + ' z ' + totalCount + ' lotów';
+                noResultsEl.style.display = (visibleCount === 0) ? 'block' : 'none';
+            }
+        }
+
+        // Policz ilość lotów w każdej kategorii na starcie
+        function updateFilterCounts() {
+            var rows = document.querySelectorAll('.flight-row');
+            var countMilitary = 0, countLight = 0, countClose = 0;
+
+            rows.forEach(function(row) {
+                if (row.getAttribute('data-military') === '1') countMilitary++;
+                if (row.getAttribute('data-category') === '1') countLight++;
+                var dist = parseFloat(row.getAttribute('data-dist'));
+                if (dist < 5.0 && dist < 9999) countClose++;
+            });
+
+            var el;
+            el = document.getElementById('count-military');
+            if (el) el.textContent = countMilitary;
+            el = document.getElementById('count-light');
+            if (el) el.textContent = countLight;
+            el = document.getElementById('count-close');
+            if (el) el.textContent = countClose;
+        }
+
+        updateFilterCounts();
+
+        // ── Modal mapy trasy ──
+
         var routeMap = null;
         var routeLayers = [];
         var activeBtn = null;
 
-        function showRoute(rowid, icao, model) {
+        function showRoute(rowid, source, icao, model) {
             var overlay = document.getElementById('map-overlay');
             overlay.classList.add('visible');
             document.getElementById('map-title').innerText = '✈️ Trasa: ' + icao + ' — ' + model;
@@ -317,8 +565,8 @@
             routeLayers.forEach(function (layer) { routeMap.removeLayer(layer); });
             routeLayers = [];
 
-            // Pobranie trasy z serwera
-            fetch('/route/history/' + rowid)
+            // Pobranie trasy z serwera (z parametrem source)
+            fetch('/route/history/' + rowid + '?source=' + source)
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     if (data.route && data.route.length >= 2) {

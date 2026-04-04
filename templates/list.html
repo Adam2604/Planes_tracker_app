@@ -143,7 +143,7 @@
         .filter-chip:hover {
             border-color: #888;
             color: #eee;
-            background: rgba(255, 255, 255, 0.04);
+            background: rgba(255,255,255,0.04);
         }
 
         .filter-chip.active {
@@ -181,11 +181,11 @@
             border-radius: 11px;
             font-size: 11px;
             font-weight: bold;
-            background: rgba(255, 255, 255, 0.12);
+            background: rgba(255,255,255,0.12);
         }
 
         .filter-chip.active .filter-count {
-            background: rgba(255, 255, 255, 0.25);
+            background: rgba(255,255,255,0.25);
         }
 
         .result-info {
@@ -369,12 +369,6 @@
         #map-close:hover {
             background: #d32f2f;
         }
-
-        .no-results-msg {
-            text-align: center;
-            margin-top: 50px;
-            color: #666;
-        }
     </style>
 </head>
 
@@ -390,7 +384,6 @@
         {% endif %}
     </h1>
 
-    <!-- Filtr zakresu dat -->
     <form class="filter-bar" method="GET" action="/list">
         <label for="date_from">Od:</label>
         <input type="date" id="date_from" name="date_from" value="{{ date_from }}">
@@ -428,10 +421,13 @@
                 <th>Trasa</th>
             </tr>
         </thead>
-        <tbody id="flights-body">
+        <tbody>
             {% for f in flights %}
-            <tr>
-                <td style="color: #aaa;">{{ f.time }}</td>
+            <tr class="flight-row"
+                data-category="{{ f.category }}"
+                data-military="{{ f.is_military|int }}"
+                data-dist="{{ f.dist }}">
+                <td style="color: #aaa;" data-sort-value="{{ f.rowid }}">{{ f.time }}</td>
                 <td>
                     <div style="font-weight: bold; margin-bottom: 4px;">
                         {{ f.model }}
@@ -467,13 +463,13 @@
     </table>
 
     {% if flights|length == 0 %}
-    <div class="no-results-msg">
+    <div style="text-align: center; margin-top: 50px; color: #666;">
         Brak zarejestrowanych lotów w wybranym zakresie dat.
     </div>
     {% endif %}
 
     <!-- Informacja o pustym filtrze (ukryta domyślnie) -->
-    <div class="no-results-msg" id="no-filter-results" style="display: none;">
+    <div style="text-align: center; margin-top: 50px; color: #666;" id="no-filter-results" hidden>
         Żaden lot nie pasuje do wybranych filtrów.
     </div>
 
@@ -485,6 +481,141 @@
     </div>
 
     <script>
+        // === Filtr typu samolotu ===
+        var activeFilters = new Set();
+
+        function toggleFilter(btn) {
+            var filterType = btn.getAttribute('data-filter');
+            if (activeFilters.has(filterType)) {
+                activeFilters.delete(filterType);
+                btn.classList.remove('active');
+            } else {
+                activeFilters.add(filterType);
+                btn.classList.add('active');
+            }
+            applyFilters();
+        }
+
+        function applyFilters() {
+            var rows = document.querySelectorAll('.flight-row');
+            var visibleCount = 0;
+            var totalCount = rows.length;
+
+            rows.forEach(function(row) {
+                if (activeFilters.size === 0) {
+                    row.classList.remove('hidden-by-filter');
+                    visibleCount++;
+                    return;
+                }
+
+                var show = false;
+                var isMilitary = row.getAttribute('data-military') === '1';
+                var isLight = row.getAttribute('data-category') === '1';
+                var dist = parseFloat(row.getAttribute('data-dist'));
+                var isClose = (dist < 5.0 && dist < 9999);
+
+                if (activeFilters.has('military') && isMilitary) show = true;
+                if (activeFilters.has('light') && isLight) show = true;
+                if (activeFilters.has('close') && isClose) show = true;
+
+                if (show) {
+                    row.classList.remove('hidden-by-filter');
+                    visibleCount++;
+                } else {
+                    row.classList.add('hidden-by-filter');
+                }
+            });
+
+            var infoEl = document.getElementById('result-info');
+            var noResultsEl = document.getElementById('no-filter-results');
+
+            if (activeFilters.size === 0) {
+                if (infoEl) infoEl.textContent = '';
+                if (noResultsEl) noResultsEl.hidden = true;
+            } else {
+                if (infoEl) infoEl.textContent = 'Wyświetlono ' + visibleCount + ' z ' + totalCount + ' lotów';
+                if (noResultsEl) noResultsEl.hidden = (visibleCount > 0);
+            }
+        }
+
+        function updateFilterCounts() {
+            var rows = document.querySelectorAll('.flight-row');
+            var countMilitary = 0, countLight = 0, countClose = 0;
+
+            rows.forEach(function(row) {
+                if (row.getAttribute('data-military') === '1') countMilitary++;
+                if (row.getAttribute('data-category') === '1') countLight++;
+                var dist = parseFloat(row.getAttribute('data-dist'));
+                if (dist < 5.0 && dist < 9999) countClose++;
+            });
+
+            var el;
+            el = document.getElementById('count-military');
+            if (el) el.textContent = countMilitary;
+            el = document.getElementById('count-light');
+            if (el) el.textContent = countLight;
+            el = document.getElementById('count-close');
+            if (el) el.textContent = countClose;
+        }
+
+        updateFilterCounts();
+
+        // === Sortowanie tabeli ===
+        var currentSort = 'time';
+        var currentDir = 'desc';
+
+        function sortTable(column) {
+            if (currentSort === column) {
+                currentDir = currentDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort = column;
+                currentDir = column === 'dist' ? 'asc' : (column === 'model' ? 'asc' : 'desc');
+            }
+
+            var tbody = document.querySelector('.flight-table tbody');
+            var rows = Array.from(tbody.querySelectorAll('tr'));
+
+            rows.sort(function (a, b) {
+                var valA, valB;
+
+                if (column === 'time') {
+                    valA = parseInt(a.children[0].getAttribute('data-sort-value')) || 0;
+                    valB = parseInt(b.children[0].getAttribute('data-sort-value')) || 0;
+                } else if (column === 'model') {
+                    valA = (a.children[1].querySelector('div') || {}).textContent || '';
+                    valB = (b.children[1].querySelector('div') || {}).textContent || '';
+                    valA = valA.trim().toLowerCase();
+                    valB = valB.trim().toLowerCase();
+                } else if (column === 'dist') {
+                    valA = parseFloat(a.children[2].getAttribute('data-sort-value')) || 9999;
+                    valB = parseFloat(b.children[2].getAttribute('data-sort-value')) || 9999;
+                }
+
+                var cmp;
+                if (typeof valA === 'string') {
+                    cmp = valA.localeCompare(valB, 'pl');
+                } else {
+                    cmp = valA - valB;
+                }
+
+                return currentDir === 'asc' ? cmp : -cmp;
+            });
+
+            rows.forEach(function (row) { tbody.appendChild(row); });
+
+            document.querySelectorAll('th.sortable').forEach(function (th) {
+                var arrow = th.querySelector('.sort-arrow');
+                if (th.getAttribute('data-sort') === column) {
+                    th.classList.add('active');
+                    arrow.textContent = currentDir === 'asc' ? '▲' : '▼';
+                } else {
+                    th.classList.remove('active');
+                    arrow.textContent = '▲▼';
+                }
+            });
+        }
+
+        // === Modal mapy trasy ===
         var routeMap = null;
         var routeLayers = [];
         var activeBtn = null;

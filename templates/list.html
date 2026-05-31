@@ -167,6 +167,11 @@
             box-shadow: 0 2px 12px rgba(67, 160, 71, 0.35);
         }
 
+        .filter-chip.active[data-filter="spoofing"] {
+            background: linear-gradient(135deg, #BF360C, #E64A19);
+            box-shadow: 0 2px 12px rgba(230, 74, 25, 0.35);
+        }
+
         .filter-chip .chip-icon {
             font-size: 15px;
         }
@@ -295,6 +300,19 @@
             border: 1px solid rgba(30, 136, 229, 0.3);
         }
 
+        .type-badge.spoofing {
+            background: rgba(255, 87, 34, 0.25);
+            color: #FF7043;
+            border: 1px solid rgba(255, 87, 34, 0.3);
+            animation: pulse-spoof 2s infinite;
+        }
+
+        @keyframes pulse-spoof {
+            0% { opacity: 1; }
+            50% { opacity: 0.6; }
+            100% { opacity: 1; }
+        }
+
         .route-btn {
             background: #FF9800;
             border: none;
@@ -405,6 +423,9 @@
         <button type="button" class="filter-chip" data-filter="close" onclick="toggleFilter(this)">
             <span class="chip-icon">📍</span> &lt;5 km <span class="filter-count" id="count-close">0</span>
         </button>
+        <button type="button" class="filter-chip" data-filter="spoofing" onclick="toggleFilter(this)">
+            <span class="chip-icon">⚠️</span> Spoofing <span class="filter-count" id="count-spoofing">0</span>
+        </button>
     </div>
     <div class="result-info" id="result-info"></div>
     {% endif %}
@@ -426,11 +447,15 @@
             <tr class="flight-row"
                 data-category="{{ f.category }}"
                 data-military="{{ f.is_military|int }}"
-                data-dist="{{ f.dist }}">
+                data-dist="{{ f.dist }}"
+                data-spoofed="{{ f.is_spoofed|int }}">
                 <td style="color: #aaa;" data-sort-value="{{ f.rowid }}">{{ f.time }}</td>
                 <td>
                     <div style="font-weight: bold; margin-bottom: 4px;">
                         {{ f.model }}
+                        {% if f.is_spoofed %}
+                        <span class="type-badge spoofing">⚠️ Spoofing</span>
+                        {% endif %}
                         {% if f.is_military %}
                         <span class="type-badge military">Wojskowy</span>
                         {% endif %}
@@ -452,7 +477,7 @@
                 <td>
                     {% if f.has_route %}
                     <button class="route-btn"
-                        onclick="showRoute({{ f.rowid }}, '{{ f.source }}', '{{ f.icao }}', '{{ f.model }}')">🗺️</button>
+                        onclick="showRoute({{ f.rowid }}, '{{ f.source }}', '{{ f.icao }}', '{{ f.model|replace("'", "\\'") }}')">🗺️</button>
                     {% else %}
                     <span style="color: #555;">—</span>
                     {% endif %}
@@ -513,10 +538,12 @@
                 var isLight = row.getAttribute('data-category') === '1';
                 var dist = parseFloat(row.getAttribute('data-dist'));
                 var isClose = (dist < 5.0 && dist < 9999);
+                var isSpoofed = row.getAttribute('data-spoofed') === '1';
 
                 if (activeFilters.has('military') && isMilitary) show = true;
                 if (activeFilters.has('light') && isLight) show = true;
                 if (activeFilters.has('close') && isClose) show = true;
+                if (activeFilters.has('spoofing') && isSpoofed) show = true;
 
                 if (show) {
                     row.classList.remove('hidden-by-filter');
@@ -540,13 +567,14 @@
 
         function updateFilterCounts() {
             var rows = document.querySelectorAll('.flight-row');
-            var countMilitary = 0, countLight = 0, countClose = 0;
+            var countMilitary = 0, countLight = 0, countClose = 0, countSpoofing = 0;
 
             rows.forEach(function(row) {
                 if (row.getAttribute('data-military') === '1') countMilitary++;
                 if (row.getAttribute('data-category') === '1') countLight++;
                 var dist = parseFloat(row.getAttribute('data-dist'));
                 if (dist < 5.0 && dist < 9999) countClose++;
+                if (row.getAttribute('data-spoofed') === '1') countSpoofing++;
             });
 
             var el;
@@ -556,6 +584,8 @@
             if (el) el.textContent = countLight;
             el = document.getElementById('count-close');
             if (el) el.textContent = countClose;
+            el = document.getElementById('count-spoofing');
+            if (el) el.textContent = countSpoofing;
         }
 
         updateFilterCounts();

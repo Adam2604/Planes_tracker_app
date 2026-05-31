@@ -155,6 +155,7 @@
         <div class="stat-row"><span>Wszystkie loty:</span> <span id="s-total" class="stat-val">0</span></div>
         <div class="stat-row"><span>Blisko (&lt; 5km):</span> <span id="s-close" class="stat-val">0</span></div>
         <div class="stat-row"><span>Wojskowe (Ghost):</span> <span id="s-mil" class="stat-val">NIE</span></div>
+        <div class="stat-row"><span>⚠️ Spoofing:</span> <span id="s-spoof" class="stat-val">0</span></div>
         <div style="margin-top: 10px; font-size: 12px; color: #aaa;">Najrzadszy dziś:</div>
         <div id="s-rare" class="stat-val highlight" style="font-size: 13px;">Brak danych</div>
     </div>
@@ -319,6 +320,12 @@
                 // a jak są puste/null, to wpisz tekst po prawej".
                 let rareText = s.stat_rarest || "Analizuję niebo...";
                 document.getElementById('s-rare').innerText = rareText;
+
+                // 4. SPOOFING
+                let spoofElem = document.getElementById('s-spoof');
+                let spoofCount = s.stat_spoofed || 0;
+                spoofElem.innerText = spoofCount > 0 ? spoofCount + " ⚠️" : "0";
+                spoofElem.style.color = spoofCount > 0 ? "#FF7043" : "white";
 
             } catch (e) {
                 console.error("Błąd połączenia", e);

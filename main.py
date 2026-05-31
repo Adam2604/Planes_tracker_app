@@ -18,6 +18,9 @@ import atexit
 MY_LAT = 51.978
 MY_LON = 17.498
 
+#Anty-spoofing — próg dystansu w km, powyżej którego pozycja jest podejrzana
+SPOOF_DIST_THRESHOLD = 400
+
 #Bazy danych
 planes = {} #aktualny stan samolotów
 cpr_buffer = {} #bufor do obliczania pozycji
@@ -113,6 +116,8 @@ def decode_details(hex_msg):
                             max_dist = max(0.4 * dt, 2)
                             if jump > max_dist:
                                 accept = False
+                                # Licznik odrzuconych skoków — wskaźnik spoofingu
+                                planes[icao]["rejected_jumps"] = planes[icao].get("rejected_jumps", 0) + 1
                                 print(f"Odrzucono skok pozycji {jump:.1f} km (max {max_dist:.1f} km) dla {icao}")
 
 
@@ -134,6 +139,7 @@ def decode_details(hex_msg):
                                     # ale tylko gdy skok jest wystarczająco duży żeby to miało sens
                                     if angle_diff > 70 and jump > 1.0:
                                         accept = False
+                                        planes[icao]["rejected_jumps"] = planes[icao].get("rejected_jumps", 0) + 1
                                         print(f"Odrzucono zmianę kierunku {angle_diff:.0f}° (skok {jump:.1f} km) dla {icao}")
 
                     if accept:
@@ -144,6 +150,7 @@ def decode_details(hex_msg):
                             "dist": round(dist, 1),
                             "last_pos_time": now
                         })
+                        evaluate_spoof_score(icao)
 
     #3. Prędkość i kurs
     elif tc == 19:
@@ -170,6 +177,54 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     a = math.sin(delta_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
     return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
 
+def evaluate_spoof_score(icao):
+    """Ocenia prawdopodobieństwo spoofingu na podstawie wielu kryteriów.
+    Ustawia is_spoofed=True gdy spoof_score >= 60."""
+    with planes_lock:
+        if icao not in planes:
+            return
+        plane = planes[icao]
+        score = 0
+
+        max_dist = plane.get("max_dist")
+        speed = plane.get("speed", 0)
+        altitude = plane.get("altitude")
+        rejected = plane.get("rejected_jumps", 0)
+        model = plane.get("model", "")
+
+        # Reguła 1: Dystans powyżej progu = pewny spoofing
+        if max_dist is not None and max_dist > SPOOF_DIST_THRESHOLD:
+            score += 60
+
+        # Reguła 2: Dystans w strefie podejrzanej (>300 km ale <400 km)
+        if max_dist is not None and 300 < max_dist <= SPOOF_DIST_THRESHOLD:
+            score += 30
+
+        # Reguła 3: Pozycja daleko (>300km) ale brak prędkości/kursu
+        if max_dist is not None and max_dist > 300 and speed == 0:
+            score += 30
+
+        # Reguła 4: Wiele odrzuconych skoków pozycji (>3)
+        if rejected > 3:
+            score += 30
+
+        # Reguła 5: Nieznany ICAO + duża odległość
+        if max_dist is not None and max_dist > 300:
+            if model == "Nieznany model" or not model:
+                score += 20
+
+        # Reguła 6: Nierealnie wysoka/niska wysokość
+        if altitude is not None:
+            if altitude > 15000 or altitude < -100:
+                score += 20
+
+        plane["spoof_score"] = score
+        plane["is_spoofed"] = score >= 60
+
+        if plane["is_spoofed"] and not plane.get("_spoof_logged"):
+            plane["_spoof_logged"] = True
+            print(f"⚠️ SPOOFING wykryty dla {icao}: score={score}, max_dist={max_dist}, speed={speed}, rejected_jumps={rejected}")
+
 def actualize_plane(icao, dane, update_last_seen=True):
     #Aktualizuje lub tworzy samolot w bazie danych
     with planes_lock:
@@ -186,7 +241,10 @@ def actualize_plane(icao, dane, update_last_seen=True):
                 "speed": 0,
                 "max_speed": 0,
                 "category": 0,
-                "route": []
+                "route": [],
+                "spoof_score": 0,
+                "is_spoofed": False,
+                "rejected_jumps": 0
             }
             planes[icao]["last_seen"] = time.time()  # Nowy samolot — zawsze ustaw
         planes[icao].update(dane)

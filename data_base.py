@@ -27,6 +27,11 @@ def init_db():
         c.execute("ALTER TABLE historia ADD COLUMN max_dist REAL")
     except sqlite3.OperationalError:
         pass  # Kolumna już istnieje
+    # Migracja — dodanie kolumny is_spoofed (flaga anty-spoofingu)
+    try:
+        c.execute("ALTER TABLE historia ADD COLUMN is_spoofed INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
     c.execute("CREATE INDEX IF NOT EXISTS idx_icao_time ON historia (icao, last_seen)")
     
     # Tabela archiwum statystyk dziennych
@@ -47,6 +52,11 @@ def init_db():
         c.execute("ALTER TABLE daily_stats ADD COLUMN range_map TEXT")
     except sqlite3.OperationalError:
         pass
+    # Migracja — dodanie kolumny spoofed_count do daily_stats
+    try:
+        c.execute("ALTER TABLE daily_stats ADD COLUMN spoofed_count INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
 
     # Tabela trwałego archiwum indywidualnych lotów (nie kasuje się po 48h)
     c.execute('''CREATE TABLE IF NOT EXISTS flights_archive (
@@ -56,6 +66,11 @@ def init_db():
                     route TEXT, max_dist REAL
                 )''')
     c.execute("CREATE INDEX IF NOT EXISTS idx_archive_last_seen ON flights_archive (last_seen)")
+    # Migracja — dodanie kolumny is_spoofed do flights_archive
+    try:
+        c.execute("ALTER TABLE flights_archive ADD COLUMN is_spoofed INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
 
     conn.commit()
     conn.close()
@@ -77,6 +92,7 @@ def save_flight(plane):
     current_last_seen = int(plane['last_seen'])
     current_route = plane.get('route', [])
     route_json = json.dumps(current_route) if current_route else None
+    is_spoofed = 1 if plane.get('is_spoofed', False) else 0
     
     today_midnight = datetime.combine(date.today(), datetime.min.time()).timestamp()
 
@@ -141,15 +157,16 @@ def save_flight(plane):
                      max_dist = ?,
                      max_speed = ?,
                      has_location = ?,
-                     route = ?
+                     route = ?,
+                     is_spoofed = ?
                      WHERE rowid = ?""", 
-                     (current_last_seen, new_best_dist, new_best_max_dist, new_best_speed, new_has_loc, merged_route_json, row_id))
+                     (current_last_seen, new_best_dist, new_best_max_dist, new_best_speed, new_has_loc, merged_route_json, is_spoofed, row_id))
 
     else:
         # NOWY WPIS
         has_loc = 1 if current_min_dist is not None else 0
         
-        c.execute("INSERT INTO historia (icao, callsign, model, min_dist, max_speed, category, has_location, first_seen, last_seen, route, max_dist) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
+        c.execute("INSERT INTO historia (icao, callsign, model, min_dist, max_speed, category, has_location, first_seen, last_seen, route, max_dist, is_spoofed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
             icao,
             plane.get('callsign', 'N/A'),
             plane.get('model', 'Nieznany'),
@@ -160,7 +177,8 @@ def save_flight(plane):
             int(plane['first_seen']),
             current_last_seen,
             route_json,
-            current_max_dist
+            current_max_dist,
+            is_spoofed
         ))
 
     conn.commit()
@@ -230,6 +248,8 @@ def archive_past_days():
         close = c.fetchone()[0]
         c.execute("SELECT COUNT(*) FROM historia WHERE last_seen >= ? AND last_seen < ? AND category = 1", (day_start, day_end))
         light = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM historia WHERE last_seen >= ? AND last_seen < ? AND is_spoofed = 1", (day_start, day_end))
+        spoofed = c.fetchone()[0]
         
         # 2. Ghost 
         key_words = ['Military', 'Air Force', 'NATO', 'Army', 'Polish Air Force']
@@ -238,28 +258,30 @@ def archive_past_days():
         ghost_row = c.fetchone()
         mil_ghost = ghost_row[0] if ghost_row else None 
         
-        # 3. Najdalszy
-        c.execute("SELECT model, COALESCE(max_dist, min_dist) as best_dist FROM historia WHERE last_seen >= ? AND last_seen < ? AND COALESCE(max_dist, min_dist) IS NOT NULL AND COALESCE(max_dist, min_dist) < 9000 ORDER BY best_dist DESC LIMIT 1", (day_start, day_end))
+        # 3. Najdalszy (BEZ spoofowanych)
+        c.execute("SELECT model, COALESCE(max_dist, min_dist) as best_dist FROM historia WHERE last_seen >= ? AND last_seen < ? AND COALESCE(max_dist, min_dist) IS NOT NULL AND COALESCE(max_dist, min_dist) < 9000 AND is_spoofed = 0 ORDER BY best_dist DESC LIMIT 1", (day_start, day_end))
         f_row = c.fetchone()
         f_model = f_row[0] if f_row else ""
         f_dist = f_row[1] if f_row else 0
         
-        # 4. Najczęstsze 5
+        # 4. Najczęstsze 5 (BEZ spoofowanych)
         c.execute("""
             SELECT model, COUNT(*) as cnt 
             FROM historia 
             WHERE last_seen >= ? AND last_seen < ? 
             AND model IS NOT NULL AND model NOT LIKE 'Nieznany%' AND model != 'None' AND TRIM(model) != ''
+            AND is_spoofed = 0
             GROUP BY model ORDER BY cnt DESC LIMIT 5
         """, (day_start, day_end))
         top_json = json.dumps(c.fetchall())
 
-        # 5. Najrzadsze 5
+        # 5. Najrzadsze 5 (BEZ spoofowanych)
         c.execute("""
             SELECT model, COUNT(*) as cnt 
             FROM historia 
             WHERE last_seen >= ? AND last_seen < ? 
             AND model IS NOT NULL AND model NOT LIKE 'Nieznany%' AND model != 'None' AND TRIM(model) != ''
+            AND is_spoofed = 0
             GROUP BY model 
         """, (day_start, day_end))
         all_models = c.fetchall()
@@ -282,7 +304,8 @@ def archive_past_days():
             if dist > day_sectors[idx]:
                 day_sectors[idx] = dist
 
-        c.execute("SELECT route FROM historia WHERE last_seen >= ? AND last_seen < ? AND route IS NOT NULL", (day_start, day_end))
+        # Mapa zasięgu — BEZ spoofowanych tras
+        c.execute("SELECT route FROM historia WHERE last_seen >= ? AND last_seen < ? AND route IS NOT NULL AND is_spoofed = 0", (day_start, day_end))
         for r_row in c.fetchall():
             if not r_row[0]: continue
             try:
@@ -297,12 +320,12 @@ def archive_past_days():
         range_map_json = json.dumps([round(d, 1) for d in day_sectors])
 
         # Zapis statystyk do bazy
-        c.execute("INSERT INTO daily_stats (day_date, total_flights, close_flights, light_flights, military_ghost_found, farthest_dist, farthest_model, rarest_model, top_model, range_map) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                  (day_str, total, close, light, mil_ghost, f_dist, f_model, rare_json, top_json, range_map_json))
+        c.execute("INSERT INTO daily_stats (day_date, total_flights, close_flights, light_flights, military_ghost_found, farthest_dist, farthest_model, rarest_model, top_model, range_map, spoofed_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                  (day_str, total, close, light, mil_ghost, f_dist, f_model, rare_json, top_json, range_map_json, spoofed))
 
         # Archiwizacja indywidualnych lotów do trwałej tabeli
-        c.execute("""INSERT INTO flights_archive (icao, callsign, model, min_dist, max_speed, category, has_location, first_seen, last_seen, route, max_dist)
-                     SELECT icao, callsign, model, min_dist, max_speed, category, has_location, first_seen, last_seen, route, max_dist
+        c.execute("""INSERT INTO flights_archive (icao, callsign, model, min_dist, max_speed, category, has_location, first_seen, last_seen, route, max_dist, is_spoofed)
+                     SELECT icao, callsign, model, min_dist, max_speed, category, has_location, first_seen, last_seen, route, max_dist, is_spoofed
                      FROM historia
                      WHERE last_seen >= ? AND last_seen < ?""", (day_start, day_end))
         
@@ -342,12 +365,16 @@ def get_history_stats(date_str, mode='day'):
             else:
                 ghost_display = str(ghost_val) # Nowe archiwum (nazwa modelu)
 
+        # Pobierz spoofed_count (kolumna 10, jeśli istnieje)
+        spoofed_count = row[10] if len(row) > 10 and row[10] else 0
+
         return {
             "total": row[1], "close": row[2], "light": row[3],
             "farthest": {'dist': row[5], 'model': row[6]} if row[5] else None,
             "ghost_model": ghost_display,
             "top_models": top_list,
-            "rare_models": rare_list
+            "rare_models": rare_list,
+            "spoofed": spoofed_count
         }
     
     elif mode == 'week' or mode == "month":
@@ -374,12 +401,8 @@ def get_history_stats(date_str, mode='day'):
             return None
         
         c.execute("""
-            SELECT SUM(total_flights), SUM(close_flights), SUM(light_flights), 
-                   MAX(military_ghost_found), MAX(farthest_dist)
-            FROM daily_stats WHERE day_date >= ? AND day_date <= ?
-        """, (s_str, e_str))
-        c.execute("""
-            SELECT SUM(total_flights), SUM(close_flights), SUM(light_flights), MAX(farthest_dist)
+            SELECT SUM(total_flights), SUM(close_flights), SUM(light_flights), MAX(farthest_dist),
+                   COALESCE(SUM(spoofed_count), 0)
             FROM daily_stats WHERE day_date >= ? AND day_date <= ?
         """, (s_str, e_str))
         sums = c.fetchone()
@@ -460,7 +483,8 @@ def get_history_stats(date_str, mode='day'):
             "farthest": {'dist': max_dist_found, 'model': max_dist_model},
             "ghost_model": ghost_text,
             "top_models": sorted_top,
-            "rare_models": final_rare
+            "rare_models": final_rare,
+            "spoofed": sums[4] if len(sums) > 4 else 0
         }
 
 def get_stat_today():
@@ -514,6 +538,10 @@ def get_stat_today():
     c.execute("SELECT COUNT(*) FROM historia WHERE last_seen > ? AND min_dist <= 5.0 AND category = 1", (today_midnight,))
     lekkie_5km = c.fetchone()[0]
 
+    # 6. Liczba spoofowanych samolotów
+    c.execute("SELECT COUNT(*) FROM historia WHERE last_seen > ? AND is_spoofed = 1", (today_midnight,))
+    spoofed_count = c.fetchone()[0]
+
     conn.close()
     
     return {
@@ -521,7 +549,8 @@ def get_stat_today():
         "stat_close": near_5km,
         "stat_rarest": best_model,
         "stat_military_ghost": military_invisible > 0, # Zwraca True/False
-        "stat_light": lekkie_5km
+        "stat_light": lekkie_5km,
+        "stat_spoofed": spoofed_count
     }
 
 def get_detailed_stats_today():
@@ -555,7 +584,7 @@ def get_detailed_stats_today():
     ghost_row = c.fetchone()
     ghost_info = ghost_row[0] if ghost_row else None
 
-    #4. Top 3 najczęstszych modeli
+    #4. Top 3 najczęstszych modeli (BEZ spoofowanych)
     c.execute("""
         SELECT model, COUNT(*) as cnt 
         FROM historia 
@@ -565,13 +594,14 @@ def get_detailed_stats_today():
         AND model != 'Nieznany model'
         AND model != 'None'
         AND TRIM(model) != ''
-        GROUP BY model 
+        AND is_spoofed = 0
+        GROUP by model 
         ORDER BY cnt DESC 
         LIMIT 5
     """, (today_midnight,))
     top_models = c.fetchall()
 
-    #5. Top 5 najrzadszych samolotów
+    #5. Top 5 najrzadszych samolotów (BEZ spoofowanych)
     c.execute("""
         SELECT model, COUNT(*) as cnt 
         FROM historia 
@@ -581,6 +611,7 @@ def get_detailed_stats_today():
         AND model != 'Nieznany model'
         AND model != 'None'
         AND TRIM(model) != ''
+        AND is_spoofed = 0
         GROUP BY model 
         ORDER BY cnt ASC 
     """, (today_midnight,))
@@ -596,19 +627,25 @@ def get_detailed_stats_today():
     scored_models.sort(key=lambda x: (x[2], -x[1]), reverse=True)
     rare_models = [(model, count) for model, count, points in scored_models[:5]]
 
-    #Najdalszy odebrany samolot (wg max_dist, fallback na min_dist dla starych danych)
+    #Najdalszy odebrany samolot (BEZ spoofowanych)
     c.execute("""
         SELECT model, COALESCE(max_dist, min_dist) as best_dist
         FROM historia
         WHERE last_seen > ? 
         AND COALESCE(max_dist, min_dist) IS NOT NULL
         AND COALESCE(max_dist, min_dist) < 9000
+        AND is_spoofed = 0
         ORDER BY best_dist DESC
         LIMIT 1
     """, (today_midnight,))
 
     farthest_row = c.fetchone()
     farthest_data = {'model': farthest_row[0], 'dist': farthest_row[1]} if farthest_row else None
+
+    # Liczba spoofowanych
+    c.execute("SELECT COUNT(*) FROM historia WHERE last_seen > ? AND is_spoofed = 1", (today_midnight,))
+    spoofed_count = c.fetchone()[0]
+
     conn.close()
 
     return {
@@ -618,7 +655,8 @@ def get_detailed_stats_today():
         "ghost_model": ghost_info,
         "top_models": top_models,
         "rare_models": rare_models,
-        "farthest": farthest_data
+        "farthest": farthest_data,
+        "spoofed": spoofed_count
     }
 
 def get_flights_list(date_from=None, date_to=None):
@@ -649,11 +687,11 @@ def get_flights_list(date_from=None, date_to=None):
     # Aby uniknąć duplikatów, z historia pobieramy tylko loty z dni
     # które NIE zostały jeszcze zarchiwizowane w daily_stats.
     c.execute("""
-        SELECT rowid, icao, model, last_seen, min_dist, max_speed, route, category, 'archive' as source
+        SELECT rowid, icao, model, last_seen, min_dist, max_speed, route, category, 'archive' as source, is_spoofed
         FROM flights_archive
         WHERE last_seen >= ? AND last_seen < ?
         UNION ALL
-        SELECT rowid, icao, model, last_seen, min_dist, max_speed, route, category, 'historia' as source
+        SELECT rowid, icao, model, last_seen, min_dist, max_speed, route, category, 'historia' as source, is_spoofed
         FROM historia
         WHERE last_seen >= ? AND last_seen < ?
         AND date(last_seen, 'unixepoch', 'localtime') NOT IN (
@@ -684,6 +722,7 @@ def get_flights_list(date_from=None, date_to=None):
         category = row[7] if row[7] else 0
         model_text = row[2] or ''
         is_military = any(kw.lower() in model_text.lower() for kw in military_keywords)
+        is_spoofed = bool(row[9]) if len(row) > 9 else False
 
         results.append({
             "rowid": row[0],
@@ -695,7 +734,8 @@ def get_flights_list(date_from=None, date_to=None):
             "has_route": has_route,
             "category": category,
             "is_military": is_military,
-            "source": row[8]  # 'archive' lub 'historia'
+            "source": row[8],  # 'archive' lub 'historia'
+            "is_spoofed": is_spoofed
         })
         
     return results
@@ -783,9 +823,9 @@ def get_range_data(date_str, mode='day', active_planes=None):
 
     if mode == 'day':
         if date_str == today_str:
-            # Dzisiaj — dane z bazy wg aktualnych godzin + aktywne samoloty
+            # Dzisiaj — dane z bazy wg aktualnych godzin + aktywne samoloty (BEZ spoofowanych)
             today_midnight = datetime.combine(date.today(), datetime.min.time()).timestamp()
-            c.execute("SELECT route FROM historia WHERE last_seen > ? AND route IS NOT NULL", (today_midnight,))
+            c.execute("SELECT route FROM historia WHERE last_seen > ? AND route IS NOT NULL AND is_spoofed = 0", (today_midnight,))
             for row in c.fetchall():
                 if not row[0]: continue
                 try:
@@ -805,7 +845,7 @@ def get_range_data(date_str, mode='day', active_planes=None):
             else:
                 day_start = datetime.strptime(date_str, "%Y-%m-%d").timestamp()
                 day_end = day_start + 86400
-                c.execute("SELECT route FROM historia WHERE last_seen >= ? AND last_seen < ? AND route IS NOT NULL", (day_start, day_end))
+                c.execute("SELECT route FROM historia WHERE last_seen >= ? AND last_seen < ? AND route IS NOT NULL AND is_spoofed = 0", (day_start, day_end))
                 for row in c.fetchall():
                     if not row[0]: continue
                     try:
@@ -843,8 +883,8 @@ def get_range_data(date_str, mode='day', active_planes=None):
                 archived_days.add(row[0])
                 _merge_sectors(row[1])
 
-        # Pobieramy to, czego jeszcze nie ma w daily_stats (np. dzisiejsze trasy lub wczorajsze przed archiwizacją)
-        c.execute("SELECT last_seen, route FROM historia WHERE last_seen >= ? AND last_seen < ? AND route IS NOT NULL", (start_ts, end_ts))
+        # Pobieramy to, czego jeszcze nie ma w daily_stats (BEZ spoofowanych)
+        c.execute("SELECT last_seen, route FROM historia WHERE last_seen >= ? AND last_seen < ? AND route IS NOT NULL AND is_spoofed = 0", (start_ts, end_ts))
         for row in c.fetchall():
             if not row[1]: continue
             row_date = datetime.fromtimestamp(row[0]).strftime("%Y-%m-%d")
@@ -860,10 +900,10 @@ def get_range_data(date_str, mode='day', active_planes=None):
             except:
                 pass
 
-    # 2. Dodaj aktywne samoloty 
+    # 2. Dodaj aktywne samoloty (BEZ spoofowanych)
     if active_planes:
         for plane in active_planes:
-            if "lat" in plane and "lon" in plane:
+            if "lat" in plane and "lon" in plane and not plane.get("is_spoofed", False):
                 _process_point(plane["lat"], plane["lon"])
 
     # Buduj wynik

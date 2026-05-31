@@ -279,6 +279,16 @@
                 <div class="number">-</div>
                 {% endif %}
             </div>
+            <div class="card" {% if s.spoofed and s.spoofed > 0 %}style="border: 1px solid rgba(255, 87, 34, 0.4);"{% endif %}>
+                <div class="label">⚠️ Spoofing</div>
+                {% if s.spoofed and s.spoofed > 0 %}
+                <div class="number" style="color: #FF7043;">{{ s.spoofed }}</div>
+                <div style="font-size: 11px; color: #888; margin-top: -5px;">wykryto podejrzanych</div>
+                {% else %}
+                <div class="number" style="color: #4CAF50;">0</div>
+                <div style="font-size: 11px; color: #888; margin-top: -5px;">czysto ✓</div>
+                {% endif %}
+            </div>
         </div>
 
         <div class="ghost-box">

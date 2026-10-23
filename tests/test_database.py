@@ -14,10 +14,10 @@ import data_base
 # ─── Fixture: tymczasowa baza danych ───────────────────────────────────────────
 
 @pytest.fixture(autouse=True)
-def test_db(tmp_path):
+def test_db(tmp_path, monkeypatch):
     """Przekierowuje bazę na tymczasowy plik przed każdym testem."""
     db_path = str(tmp_path / "test_radar.db")
-    data_base.DB_NAME = db_path
+    monkeypatch.setattr(data_base, "DB_NAME", db_path)
     data_base.init_db()
     yield db_path
 

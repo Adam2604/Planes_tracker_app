@@ -1,17 +1,5 @@
 import pytest
-import math
-
-
-def calculate_distance(lat1, lon1, lat2, lon2):
-    """Kopia funkcji z main.py — importowana bezpośrednio, bo main.py
-    wymaga rtlsdr, którego nie ma w środowisku testowym."""
-    R = 6371
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    delta_phi = math.radians(lat2 - lat1)
-    delta_lambda = math.radians(lon2 - lon1)
-    a = math.sin(delta_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
-    return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
-
+from anomaly import calculate_distance
 
 class TestCalculateDistance:
     """Testy funkcji calculate_distance (wzór Haversine'a)."""

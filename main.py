@@ -1,6 +1,3 @@
-from rtlsdr import RtlSdr
-import numpy as np
-import pyModeS as pms #biblioteka do wyciągania danych samolotu
 import time
 import threading
 import math
@@ -13,13 +10,23 @@ from datetime import date, datetime, timedelta
 import logging
 import signal
 import atexit
+from anomaly import TrackDetector, Settings, calculate_distance, bearing, altitude_band
+from aircraft_state import update_plane
+from observation_store import ObservationStore
+from radio_decoder import FrameValidator, extract_message, text_from_bits
 
 #Współrzędne anteny
 MY_LAT = 51.978
 MY_LON = 17.498
 
-#Anty-spoofing — próg dystansu w km, powyżej którego pozycja jest podejrzana
-SPOOF_DIST_THRESHOLD = 400
+# Change the profile name after moving/replacing the antenna or changing gain.
+STATION_PROFILE = os.environ.get("PLANES_STATION_PROFILE", "default")
+STATION_ID = f"{MY_LAT:.6f},{MY_LON:.6f}:{STATION_PROFILE}"
+DETECTOR_SETTINGS = Settings()
+detectors = {}
+observation_store = None
+receiver_stop = threading.Event()
+receiver_thread = None
 
 #Bazy danych
 planes = {} #aktualny stan samolotów
@@ -62,207 +69,91 @@ def load_csv_data():
     except Exception as e:
         print(f"Błąd podczas wczytywania bazy: {e}")
 
-def text_from_bits(bits):
-    try:
-        n = int(bits, 2)
-        return "{:028X}".format(n) #zamiana na HEX, wymuszenie 28 znaków
-    except ValueError:
-        return ""
-    
 def decode_details(hex_msg):
+    import pyModeS as pms
     tc = pms.typecode(hex_msg)
-    icao = pms.icao(hex_msg)
+    icao = pms.icao(hex_msg).upper()
     now = time.time()
-
-    #1. Nazwa lotu
+    if tc is None:
+        return
     if 1 <= tc <= 4:
-        callsing = pms.adsb.callsign(hex_msg).strip()
-        category = pms.adsb.category(hex_msg)
-        print(f"Nazwa lotu: {callsing.strip()}")
-        actualize_plane(icao, {"callsign": callsing, "category": category})
-    
-    #2. Wysokość
+        actualize_plane(icao, {"callsign": pms.adsb.callsign(hex_msg).strip(),
+                               "category": pms.adsb.category(hex_msg)})
     elif 9 <= tc <= 18:
         altitude = pms.adsb.altitude(hex_msg)
-        altitude_meters = round(altitude * 0.3048)
+        altitude_meters = round(altitude * .3048) if altitude is not None else None
         actualize_plane(icao, {"altitude": altitude_meters})
-        print(f"Wysokość: {altitude_meters} m")
-
-        #Logika pozycji - Odd/Even
         oe = pms.adsb.oe_flag(hex_msg)
-        
-        with planes_lock: # Zabezpieczamy dostęp do cpr_buffer na wypadek usuwania przez wątek cleaner
-            if icao not in cpr_buffer:
-                cpr_buffer[icao] = [None, None] #Even, Odd
-            cpr_buffer[icao][oe] = (hex_msg, now)
-            even, odd = cpr_buffer[icao]
-
-        if even and odd and abs(even[1] - odd[1]) < 10:  # Standard ADS-B pozwala do 10s dla local decoding
+        with planes_lock:
+            pair = cpr_buffer.setdefault(icao, [None, None])
+            pair[oe] = (hex_msg, now)
+            even, odd = pair
+        if even and odd and abs(even[1] - odd[1]) < 10:
             pos = pms.adsb.position(even[0], odd[0], even[1], odd[1], MY_LAT, MY_LON)
             if pos:
-                dist = calculate_distance(MY_LAT, MY_LON, pos[0], pos[1])
-                if dist < 800:  # Zwiększony zasięg — CRC i tak filtruje błędne pozycje
-                    # Filtrowanie skoków pozycji
-                    accept = True
-                    with planes_lock:
-                        if icao in planes and "lat" in planes[icao] and "lon" in planes[icao]:
-                            prev_lat = planes[icao]["lat"]
-                            prev_lon = planes[icao]["lon"]
-                            prev_time = planes[icao].get("last_pos_time", 0)
-                            jump = calculate_distance(prev_lat, prev_lon, pos[0], pos[1])
-                            dt = now - prev_time if prev_time else 10
-
-                            # Filtr 1: Max prędkość ~1200 km/h = 0.333 km/s
-                            max_dist = max(0.4 * dt, 2)
-                            if jump > max_dist:
-                                accept = False
-                                # Licznik odrzuconych skoków — wskaźnik spoofingu
-                                planes[icao]["rejected_jumps"] = planes[icao].get("rejected_jumps", 0) + 1
-                                print(f"Odrzucono skok pozycji {jump:.1f} km (max {max_dist:.1f} km) dla {icao}")
-
-
-                            if accept and jump > 0.3:
-                                route = planes[icao].get("route", [])
-                                if len(route) >= 2:
-                                    # Kierunek z dwóch ostatnich znanych pozycji
-                                    p1 = route[-2]
-                                    p2 = route[-1]
-                                    # Kierunek dotychczasowy (p1 → p2)
-                                    bearing_old = math.atan2(p2[1] - p1[1], p2[0] - p1[0])
-                                    # Kierunek nowy (p2 → nowa pozycja)
-                                    bearing_new = math.atan2(pos[1] - prev_lon, pos[0] - prev_lat)
-                                    # Różnica kątów w stopniach
-                                    angle_diff = abs(math.degrees(bearing_new - bearing_old)) % 360
-                                    if angle_diff > 180:
-                                        angle_diff = 360 - angle_diff
-                                    # Odrzuć jeśli zmiana kierunku > 70°
-                                    # ale tylko gdy skok jest wystarczająco duży żeby to miało sens
-                                    if angle_diff > 70 and jump > 1.0:
-                                        accept = False
-                                        planes[icao]["rejected_jumps"] = planes[icao].get("rejected_jumps", 0) + 1
-                                        print(f"Odrzucono zmianę kierunku {angle_diff:.0f}° (skok {jump:.1f} km) dla {icao}")
-
-                    if accept:
-                        print(f"Samolot znajduje się {dist:.1f} km ode mnie")
-                        actualize_plane(icao,{
-                            "lat": pos[0],
-                            "lon": pos[1],
-                            "dist": round(dist, 1),
-                            "last_pos_time": now
-                        })
-                        evaluate_spoof_score(icao)
-
-    #3. Prędkość i kurs
+                process_position(icao, pos[0], pos[1], now, hex_msg)
     elif tc == 19:
         velocity = pms.adsb.velocity(hex_msg)
         if velocity:
             speed, heading, rate, v_type = velocity
-            speed_kmh = round(speed * 1.852)
-            if v_type == "GS":
-                print(f"Prędkość względem ziemi: {speed_kmh} km/h, Kurs: {heading:.2f}°")
-            elif v_type == "IAS" or v_type == "TAS":
-                print(f"Prędkość powietrzna (IAS/TAS): {speed_kmh} km/h")
             actualize_plane(icao, {
-                "speed": speed_kmh,
-                "heading": heading,
-                "v_type": v_type
+                "speed": round(speed * 1.852) if speed is not None else None,
+                "heading": heading, "v_type": v_type,
+                "vertical_rate": round(rate * .3048 / 60, 2) if rate is not None else None,
+                "velocity_time": now,
             })
 
-def calculate_distance(lat1, lon1, lat2, lon2):
-    #Obliczanie odległości do samolotu za pomocą wzoru Haversine'a
-    R = 6371 # Promień Ziemi w km
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    delta_phi = math.radians(lat2 - lat1)
-    delta_lambda = math.radians(lon2 - lon1)
-    a = math.sin(delta_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
-    return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
 
-def evaluate_spoof_score(icao):
-    """Ocenia prawdopodobieństwo spoofingu na podstawie wielu kryteriów.
-    Ustawia is_spoofed=True gdy spoof_score >= 60."""
+def process_position(icao, lat, lon, now=None, raw_message=None):
+    now = time.time() if now is None else now
+    if not (math.isfinite(lat) and math.isfinite(lon) and -90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    distance = calculate_distance(MY_LAT, MY_LON, lat, lon)
+    sector = int(bearing(MY_LAT, MY_LON, lat, lon) // 10)
     with planes_lock:
-        if icao not in planes:
-            return
-        plane = planes[icao]
-        score = 0
+        plane = update_plane(planes, planes_data, icao, {}, now)
+        band = altitude_band(plane.get("altitude"))
+        fresh_velocity = 0 <= now - plane.get("velocity_time", float("-inf")) <= DETECTOR_SETTINGS.velocity_max_age
+        point = {
+            "icao": icao, "track_id": plane["track_id"], "time": now,
+            "lat": lat, "lon": lon, "altitude": plane.get("altitude"),
+            "distance": distance, "sector": sector, "band": band,
+            "raw_message": raw_message,
+            **{key: plane.get(key) if fresh_velocity else None
+               for key in ("speed", "heading", "vertical_rate", "v_type", "velocity_time")},
+        }
+        profile = observation_store.profiles.get((sector, band)) if observation_store else None
+        detector = detectors.setdefault(icao, TrackDetector(DETECTOR_SETTINGS))
+        analysis = detector.observe(point, profile)
+        previous = plane.get("anomaly", {})
+        point["event"] = ((analysis["status"], analysis["reasons"]) !=
+                          (previous.get("status", "clear"), previous.get("reasons", [])))
+        plane["anomaly"] = analysis
+        plane["spoof_score"] = analysis["score"]
+        # Observation mode never flags a flight for exclusion by legacy statistics.
+        plane["is_spoofed"] = False
+        if not analysis["accepted"]:
+            plane["rejected_jumps"] += 1
+        if analysis["reason_codes"]:
+            segments = plane.setdefault("suspect_segments", [])
+            anchor = [plane["lat"], plane["lon"]] if "lat" in plane else [lat, lon]
+            segments.append([anchor, [lat, lon]])
+            del segments[:-200]
+        if analysis["accepted"]:
+            if analysis["break_route"] and plane["route"]:
+                plane["route"].append(None)
+            update_plane(planes, planes_data, icao,
+                         {"lat": lat, "lon": lon, "dist": round(distance, 1), "last_pos_time": now}, now)
+        point["analysis"] = analysis
+    if observation_store:
+        observation_store.submit(point)
+    return analysis
 
-        max_dist = plane.get("max_dist")
-        speed = plane.get("speed", 0)
-        altitude = plane.get("altitude")
-        rejected = plane.get("rejected_jumps", 0)
-        model = plane.get("model", "")
-
-        # Reguła 1: Dystans powyżej progu = pewny spoofing
-        if max_dist is not None and max_dist > SPOOF_DIST_THRESHOLD:
-            score += 60
-
-        # Reguła 2: Dystans w strefie podejrzanej (>300 km ale <400 km)
-        if max_dist is not None and 300 < max_dist <= SPOOF_DIST_THRESHOLD:
-            score += 30
-
-        # Reguła 3: Pozycja daleko (>300km) ale brak prędkości/kursu
-        if max_dist is not None and max_dist > 300 and speed == 0:
-            score += 30
-
-        # Reguła 4: Wiele odrzuconych skoków pozycji (>3)
-        if rejected > 3:
-            score += 30
-
-        # Reguła 5: Nieznany ICAO + duża odległość
-        if max_dist is not None and max_dist > 300:
-            if model == "Nieznany model" or not model:
-                score += 20
-
-        # Reguła 6: Nierealnie wysoka/niska wysokość
-        if altitude is not None:
-            if altitude > 15000 or altitude < -100:
-                score += 20
-
-        plane["spoof_score"] = score
-        plane["is_spoofed"] = score >= 60
-
-        if plane["is_spoofed"] and not plane.get("_spoof_logged"):
-            plane["_spoof_logged"] = True
-            print(f"⚠️ SPOOFING wykryty dla {icao}: score={score}, max_dist={max_dist}, speed={speed}, rejected_jumps={rejected}")
 
 def actualize_plane(icao, dane, update_last_seen=True):
-    #Aktualizuje lub tworzy samolot w bazie danych
     with planes_lock:
-        if icao not in planes:
-            #Gdy odebrano sygnał samolotu po raz pierwszy to szukamy go w bazie
-            model_info = planes_data.get(icao, "Nieznany model")
-            planes[icao] = {
-                "icao": icao,
-                "first_seen": time.time(),
-                "model": model_info,
-                "dist": None,  #domyślna wartość dystansu
-                "min_dist": None,
-                "max_dist": None,
-                "speed": 0,
-                "max_speed": 0,
-                "category": 0,
-                "route": [],
-                "spoof_score": 0,
-                "is_spoofed": False,
-                "rejected_jumps": 0
-            }
-            planes[icao]["last_seen"] = time.time()  # Nowy samolot — zawsze ustaw
-        planes[icao].update(dane)
-        if update_last_seen:
-            planes[icao]["last_seen"] = time.time()
+        update_plane(planes, planes_data, icao, dane, time.time(), update_last_seen)
 
-        if "lat" in dane and "lon" in dane:
-            planes[icao]["route"].append([dane["lat"], dane["lon"]])
-
-        if "dist" in dane:
-            if planes[icao]["min_dist"] is None or dane["dist"] < planes[icao]["min_dist"]:
-                planes[icao]["min_dist"] = dane["dist"]
-            if planes[icao]["max_dist"] is None or dane["dist"] > planes[icao]["max_dist"]:
-                planes[icao]["max_dist"] = dane["dist"]
-
-        if "speed" in dane:
-            if dane["speed"] > planes[icao]["max_speed"]:
-                planes[icao]["max_speed"] = dane["speed"]
 
 def cleaner():
     #Usuwanie samolotów, które nie były widziane przez minutę
@@ -276,6 +167,7 @@ def cleaner():
                 #Najpiew zapisz do bazy a potem usuń
                 data_base.save_flight(planes[k])
                 del planes[k]
+                detectors.pop(k, None)
                 if k in cpr_buffer:
                     del cpr_buffer[k]
 
@@ -308,6 +200,11 @@ def watchdog():
         
 
 def radio_loop():
+    from rtlsdr import RtlSdr
+    import numpy as np
+    import pyModeS as pms
+    validator = FrameValidator()
+    tail = np.array([], dtype=float)
     #Konfiguracja
     sdr = RtlSdr()
     sdr.sample_rate = 2000000
@@ -319,9 +216,10 @@ def radio_loop():
 
     print("Czekam na sygnał")
     try:
-        while True:
+        while not receiver_stop.is_set():
             samples = sdr.read_samples(512 * 1024)  # Większy bufor = mniej luk w odczycie
-            mag = np.abs(samples) #amplituda
+            mag = np.concatenate((tail, np.abs(samples)))
+            tail = mag[-239:].copy()  # Preserve frames crossing read boundaries.
 
             #Wykrywanie preambuły
             p0 = mag[: -16] #Sygnał w chwili T
@@ -350,66 +248,28 @@ def radio_loop():
             #Hits = True -> wiadomość od samolotu się zaczyna
 
             for idx in hit_indices:
-                data_start = idx + 16 #dane zaczynają się 16 próbek po preambule
-                if data_start + 224 >= len(mag): continue
-                #Dekodowanie bitów
-                signal_slice = mag[data_start: data_start + 224]
-                try:
-                    bit_pairs = signal_slice.reshape(112, 2)
-                    #Jeżeli pierwsza połówka pary jest wyższa -> bit "1"
-                    bits_list = bit_pairs[:, 0] > bit_pairs[:, 1]
-                    bits = "".join(["1" if b else "0" for b in bits_list])
-
-                    hex_msg = text_from_bits(bits)
-                except ValueError:
+                # Defer the final possible preambles to the next read, exactly once.
+                if idx >= len(mag) - 239:
                     continue
-
-                #Filtrowanie - standardowy ADS-B (DF17 = "8D") 
-                #oraz sygnały zależne/TIS-B/ADS-R (DF18 = "90", "91", "92") dla większej ilości detekcji
-                #Dodatkowo za pomocą biblioteki pyModeS sprawdzamy sumę kontrolną
-                #żeby nie brac pod uwagę błędnych ramek
-                first_two = hex_msg[:2]
-                first_byte = int(first_two, 16) if len(hex_msg) >= 2 else 0
-
-                # DF17 (ADS-B) i DF18 (TIS-B/ADS-R) — pełne dane
-                if first_two in ("8D", "90", "91", "92"):
-                    try:
-                        if pms.crc(hex_msg) == 0:
-                            last_packet_time = time.time()
-                            icao = pms.icao(hex_msg)
-                            tc = pms.typecode(hex_msg)
-                            print(f"Odebrano wiadomość od samolotu ICAO: {icao}, \nType Code: {tc}, HEX: {hex_msg}")
-                            decode_details(hex_msg)
-                            print("-"*40)
-                    except:
-                        pass
-
-                # DF11 (Mode S All-Call Reply)
-                elif first_two == "5D":
-                    try:
-                        if pms.crc(hex_msg) == 0:
-                            last_packet_time = time.time()
-                            icao = pms.icao(hex_msg)
-                            actualize_plane(icao, {}, update_last_seen=False)
-                            print(f"DF11 All-Call od ICAO: {icao}")
-                    except:
-                        pass
-
-                # DF20/DF21 (Comm-B)
-                elif 0xA0 <= first_byte <= 0xBF:
-                    try:
-                        if pms.crc(hex_msg) == 0:
-                            last_packet_time = time.time()
-                            icao = pms.icao(hex_msg)
-                            alt = pms.common.altcode(hex_msg)
-                            if alt:
-                                alt_m = round(alt * 0.3048)
-                                actualize_plane(icao, {"altitude": alt_m}, update_last_seen=False)
-                                print(f"Comm-B altitude od ICAO: {icao}, wysokość: {alt_m} m")
-                            else:
-                                actualize_plane(icao, {}, update_last_seen=False)
-                    except:
-                        pass
+                hex_msg = extract_message(mag, idx + 16)
+                if not hex_msg:
+                    continue
+                try:
+                    frame = validator.validate(hex_msg, pms, time.time())
+                    if frame is None:
+                        continue
+                    df, icao = frame
+                    last_packet_time = time.time()
+                    if df in (17, 18):
+                        decode_details(hex_msg)
+                    elif df == 20:
+                        alt = pms.common.altcode(hex_msg)
+                        actualize_plane(icao, {"altitude": round(alt * .3048) if alt is not None else None})
+                    else:
+                        # DF21 carries identity, not altitude; DF11 only confirms presence.
+                        actualize_plane(icao, {})
+                except (ValueError, TypeError, RuntimeError, IndexError):
+                    logging.debug("Rejected undecodable frame %s", hex_msg, exc_info=True)
     except KeyboardInterrupt:
         print("Zakończono odbiór sygnału.")
     finally:
@@ -422,6 +282,11 @@ def cleanup_on_exit():
     if cleanup_done:
         return
     cleanup_done = True
+    receiver_stop.set()
+    if receiver_thread and receiver_thread is not threading.current_thread():
+        receiver_thread.join(timeout=5)
+    if observation_store:
+        observation_store.close()
     print("\n" + "="*50)
     print("Zabezpieczenie: Zapisywanie aktywnych samolotów do bazy przed zamknięciem...")
     saved_count = 0
@@ -444,7 +309,10 @@ def get_data():
     with planes_lock:
         planes_for_map = []
         for plane in planes.values():
-            map_plane = {k: v for k, v in plane.items() if k != "route"}
+            map_plane = {k: v for k, v in plane.items() if k not in ("route", "suspect_segments")}
+            if "anomaly" in plane:
+                map_plane["anomaly"] = dict(plane["anomaly"],
+                    stale=time.time() - plane["anomaly"]["evaluated_at"] > 15)
             planes_for_map.append(map_plane)
         return jsonify(planes_for_map)
 
@@ -455,7 +323,7 @@ def get_route(icao):
         plane = planes.get(normalized_icao)
         if plane:
             route = plane.get("route", [])
-            return jsonify({"icao": normalized_icao, "active": True, "route": route})
+            return jsonify({"icao": normalized_icao, "active": True, "route": route, "suspect_segments": plane.get("suspect_segments", [])})
 
     # Fallback — samolot nie jest aktywny, szukaj trasy w bazie danych
     import sqlite3 as _sqlite3
@@ -482,9 +350,23 @@ def get_route_history(rowid):
         return jsonify({"icao": None, "route": []})
     return jsonify({"icao": icao, "route": route})
 
+@app.route('/api/anomalies')
+def api_anomalies():
+    if observation_store is None:
+        return jsonify({"events": [], "health": {"mode": "observe", "storage_ok": False}})
+    return jsonify({"events": observation_store.recent_events(), "health": observation_store.health()})
+
+
+@app.route('/anomalies')
+def anomalies_page():
+    return render_template('anomalies.html')
+
+
 @app.route('/stats')
 def get_stats():
     stats = data_base.get_stat_today()
+    with planes_lock:
+        stats["stat_anomalies"] = sum(p.get("anomaly", {}).get("status") in ("anomaly", "suspected") for p in planes.values())
     return jsonify(stats)
 
 @app.route('/list')
@@ -577,9 +459,13 @@ if __name__ == "__main__":
 
     load_csv_data()
     data_base.init_db()
+    observation_store = ObservationStore(data_base.DB_NAME, STATION_ID, DETECTOR_SETTINGS)
+    observation_store.initialize()
+    observation_store.start()
     data_base.archive_past_days()
     #uruchomienie wątków
-    threading.Thread(target=radio_loop, daemon=True).start()
+    receiver_thread = threading.Thread(target=radio_loop, name="radio-receiver", daemon=True)
+    receiver_thread.start()
     threading.Thread(target=cleaner, daemon=True).start()
     threading.Thread(target=watchdog, daemon=True).start()
 

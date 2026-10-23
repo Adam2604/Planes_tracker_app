@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Analiza anomalii — Planes Tracker</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; background: #0f1720; color: #e2e8f0; font: 16px/1.6 system-ui, sans-serif; }
+        main { max-width: 1100px; padding: 32px 20px; margin: auto; }
+        a { color: #7dd3fc; }
+        h1 { margin-bottom: 8px; font-size: clamp(26px, 5vw, 38px); }
+        .muted { color: #a8bacb; }
+        .notice, article { background: #182431; border: 1px solid #304456; border-radius: 12px; padding: 20px; margin: 18px 0; }
+        .notice { border-left: 4px solid #7dd3fc; }
+        .tag { display: inline-block; border: 1px solid currentColor; border-radius: 6px; padding: 2px 9px; margin-right: 10px; }
+        .anomaly { color: #fbbf24; } .suspected { color: #fb923c; } .clear { color: #86efac; }
+        article h2 { font-size: 18px; margin: 0 0 10px; }
+        article p { margin: 6px 0; } ul { margin: 8px 0; padding-left: 22px; }
+        #health { margin-top: 12px; } .error { color: #fca5a5; }
+    </style>
+</head>
+<body><main>
+    <a href="/">← Wróć do mapy</a>
+    <h1>Analiza anomalii</h1>
+    <p class="muted">Historia zmian oceny pozycji samolotów z ostatnich 30 dni. Do 100 najnowszych zdarzeń.</p>
+    <div class="notice">
+        <strong>Tryb obserwacyjny</strong><br>
+        Podejrzenia nie wykluczają lotów ze statystyk. Alarm opisuje niespójność danych,
+        nie potwierdza spoofingu. Profil porównuje zgłaszane pozycje, nie mierzy kierunku nadejścia sygnału.
+        <div id="health" aria-live="polite">Ładowanie stanu analizy…</div>
+    </div>
+    <p id="error" class="error" role="status"></p>
+    <section id="events" aria-label="Historia zdarzeń"><p>Ładowanie zdarzeń…</p></section>
+</main>
+<script>
+    function element(tag, text, className) {
+        const node = document.createElement(tag);
+        node.textContent = text;
+        if (className) node.className = className;
+        return node;
+    }
+    async function refresh() {
+        try {
+            const response = await fetch('/api/anomalies');
+            if (!response.ok) throw new Error('Serwer nie odpowiada');
+            const payload = await response.json();
+            const health = payload.health;
+            document.getElementById('health').textContent =
+                `Gotowe profile kierunku i wysokości: ${health.ready_buckets || 0}/180. ` +
+                `Oczekujące obserwacje: ${health.queued || 0}. Utracone: ${health.dropped || 0}. ` +
+                (health.storage_ok ? 'Zapis działa.' : 'Problem z zapisem obserwacji.');
+            document.getElementById('health').className = health.storage_ok ? '' : 'error';
+            const container = document.getElementById('events');
+            container.replaceChildren();
+            if (!payload.events.length) {
+                container.append(element('p', 'Brak zarejestrowanych zdarzeń. Profil zasięgu potrzebuje co najmniej 30 przelotów z 3 dni w danym sektorze i przedziale wysokości.', 'muted'));
+            }
+            payload.events.forEach(event => {
+                const a = event.analysis;
+                const card = element('article', '');
+                const title = element('h2', '');
+                title.append(element('span', a.label, 'tag ' + a.status), document.createTextNode(event.icao));
+                card.append(title, element('p', new Date(event.time * 1000).toLocaleString('pl-PL'), 'muted'));
+                const reasons = element('ul', '');
+                (a.reasons || []).forEach(reason => reasons.append(element('li', reason)));
+                if (a.status === 'clear') reasons.append(element('li', 'Ocena wygasła po okresie poprawnych obserwacji.'));
+                card.append(reasons);
+                const p = a.profile;
+                card.append(element('p', p.ready
+                    ? `Profil: ${p.tracks} przelotów / ${p.days} dni, P99: ${p.p99_km} km.`
+                    : `Profil: za mało danych (${p.tracks} przelotów / ${p.days} dni).`, 'muted'));
+                card.append(element('p', `Pozycja zgłoszona: ${event.lat.toFixed(4)}, ${event.lon.toFixed(4)} · ${a.accepted ? 'Punkt przyjęty do trasy' : 'Punkt odrzucony z trasy'} · ${a.version}`, 'muted'));
+                container.append(card);
+            });
+            document.getElementById('error').textContent = '';
+        } catch (err) {
+            document.getElementById('error').textContent = 'Nie udało się odświeżyć danych. Wyświetlona historia może być nieaktualna.';
+        } finally {
+            setTimeout(refresh, 10000);
+        }
+    }
+    refresh();
+</script>
+</body></html>

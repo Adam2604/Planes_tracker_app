@@ -155,7 +155,7 @@
         <div class="stat-row"><span>Wszystkie loty:</span> <span id="s-total" class="stat-val">0</span></div>
         <div class="stat-row"><span>Blisko (&lt; 5km):</span> <span id="s-close" class="stat-val">0</span></div>
         <div class="stat-row"><span>Wojskowe (Ghost):</span> <span id="s-mil" class="stat-val">NIE</span></div>
-        <div class="stat-row"><span>⚠️ Spoofing:</span> <span id="s-spoof" class="stat-val">0</span></div>
+        <div class="stat-row"><a href="/anomalies" style="color: #ffb74d">⚠️ Anomalie:</a> <span id="s-spoof" class="stat-val">0</span></div>
         <div style="margin-top: 10px; font-size: 12px; color: #aaa;">Najrzadszy dziś:</div>
         <div id="s-rare" class="stat-val highlight" style="font-size: 13px;">Brak danych</div>
     </div>
@@ -191,6 +191,23 @@
         var planesMarkers = {};
         var selectedIcao = null;
         var selectedRouteLine = null;
+        var suspectRouteLine = null;
+        function escapeHtml(value) {
+            const el = document.createElement('span');
+            el.textContent = value == null ? '—' : String(value);
+            return el.innerHTML;
+        }
+        function anomalyPopup(a) {
+            if (!a) return '<br>Analiza: oczekiwanie na pozycję';
+            const color = a.status === 'clear' ? '#81c784' : '#ffb74d';
+            return `<br><b style="color:${color}">${escapeHtml(a.label)}</b> · tryb obserwacyjny` +
+                (a.stale ? '<br>Ocena nieaktualna — brak świeżej pozycji' : '') +
+                (a.since ? '<br>Od: ' + new Date(a.since * 1000).toLocaleTimeString('pl-PL') : '') +
+                a.reasons.map(r => '<br>• ' + escapeHtml(r)).join('') +
+                (a.profile.ready ? `<br>Profil: ${a.profile.tracks} przelotów, P99 ${a.profile.p99_km} km`
+                    : '<br>Profil zasięgu: za mało danych') +
+                '<br><a href="/anomalies">Historia zdarzeń</a>';
+        }
 
         function createPlaneIcon(heading, category) {
             let angle = heading || 0;
@@ -203,6 +220,7 @@
         }
 
         function clearSelectedRoute() {
+            if (suspectRouteLine) { map.removeLayer(suspectRouteLine); suspectRouteLine = null; }
             if (selectedRouteLine) {
                 map.removeLayer(selectedRouteLine);
                 selectedRouteLine = null;
@@ -233,19 +251,22 @@
                     return;
                 }
 
-                if (!payload.route || payload.route.length < 2) {
-                    hideSelectedRouteLine();
-                    return;
-                }
-
-                if (selectedRouteLine) {
-                    selectedRouteLine.setLatLngs(payload.route);
-                } else {
-                    selectedRouteLine = L.polyline(payload.route, {
-                        color: '#FF0000',
-                        weight: 3,
-                        opacity: 0.9
-                    }).addTo(map);
+                const segments = [];
+                let segment = [];
+                (payload.route || []).forEach(point => {
+                    if (point === null) { if (segment.length) segments.push(segment); segment = []; }
+                    else segment.push(point);
+                });
+                if (segment.length) segments.push(segment);
+                hideSelectedRouteLine();
+                if (segments.length) selectedRouteLine = L.polyline(segments, {
+                    color: '#4fc3f7', weight: 3, opacity: 0.9
+                }).addTo(map);
+                if (suspectRouteLine) { map.removeLayer(suspectRouteLine); suspectRouteLine = null; }
+                if (payload.suspect_segments && payload.suspect_segments.length) {
+                    suspectRouteLine = L.polyline(payload.suspect_segments, {
+                        color: '#ff9800', weight: 3, dashArray: '6 7'
+                    }).addTo(map).bindTooltip('Podejrzane obserwacje — tryb obserwacyjny');
                 }
             } catch (e) {
                 console.error("Błąd trasy", e);
@@ -267,8 +288,8 @@
                     }
                 }
                 planes.forEach(p => {
-                    if (p.lat && p.lon) {
-                        let popupText = `<b>${p.callsign || p.icao}</b><br>${p.model}<br>Wys: ${p.altitude}m | Pręd: ${p.speed}km/h<br>Odl: ${p.dist}km`;
+                    if (p.lat != null && p.lon != null) {
+                        let popupText = `<b>${escapeHtml(p.callsign || p.icao)}</b><br>${escapeHtml(p.model)}<br>Wys: ${escapeHtml(p.altitude)} m | Pręd: ${escapeHtml(p.speed)} km/h<br>Odl: ${escapeHtml(p.dist)} km` + anomalyPopup(p.anomaly);
                         let icon = createPlaneIcon(p.heading, p.category);
                         if (planesMarkers[p.icao]) {
                             let marker = planesMarkers[p.icao];
@@ -323,7 +344,7 @@
 
                 // 4. SPOOFING
                 let spoofElem = document.getElementById('s-spoof');
-                let spoofCount = s.stat_spoofed || 0;
+                let spoofCount = s.stat_anomalies || 0;
                 spoofElem.innerText = spoofCount > 0 ? spoofCount + " ⚠️" : "0";
                 spoofElem.style.color = spoofCount > 0 ? "#FF7043" : "white";
 

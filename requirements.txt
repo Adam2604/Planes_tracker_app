@@ -1,0 +1,4 @@
+Flask>=3.1,<4
+numpy>=1.26,<3
+pyModeS>=2.19,<3
+pyrtlsdr>=0.3,<1

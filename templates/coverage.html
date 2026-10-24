@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pl"><head>
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Wyuczony zasięg — Planes Tracker</title>
+    <link rel="stylesheet" href="/static/analysis.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script defer src="/static/analysis-common.js"></script><script defer src="/static/coverage.js"></script>
+</head><body><main>
+    <nav><a href="/">Mapa na żywo</a><a href="/anomalies">Zdarzenia</a></nav>
+    <h1>Wyuczony zasięg</h1>
+    <p class="muted">Zasięg typowo obserwowanych pozycji według kierunku i wysokości barometrycznej.</p>
+    <div class="panel notice">To profil obserwacji, a nie pomiar kierunku nadejścia sygnału ani gwarantowany zasięg anteny.
+        P95 i P99 opisują maksymalne odległości poszczególnych sesji śledzenia. Brak danych nie oznacza braku zasięgu.</div>
+    <label for="band">Wysokość barometryczna</label>
+    <select id="band"><option value="0">Poniżej 3 km</option><option value="1">3–6 km</option>
+        <option value="2">6–9 km</option><option value="3" selected>9–12 km</option><option value="4">12 km i więcej</option></select>
+    <p id="summary" role="status">Ładowanie profilu…</p><p id="error" class="error" role="alert"></p>
+    <div id="coverage-map" class="map" aria-label="Mapa zasięgu"></div>
+    <p class="muted">Niebieski: P95 · zielony: P99 · pomarańczowa linia: próg anomalii.
+        Niegotowe sektory mają szary znacznik kierunku o stałej długości 20 km — nie określa on zasięgu.
+        Kliknij sektor, aby zobaczyć jego dane.</p>
+    <div class="panel table-scroll"><table><caption>Dane wszystkich 36 sektorów</caption>
+        <thead><tr><th>Kierunek</th><th>Stan</th><th>Sesje / dni</th><th>P95</th><th>P99</th><th>Próg</th></tr></thead>
+        <tbody id="sectors"></tbody></table></div>
+</main></body></html>

@@ -10,9 +10,10 @@ from datetime import date, datetime, timedelta
 import logging
 import signal
 import atexit
+import hmac
 from anomaly import TrackDetector, Settings, calculate_distance, bearing, altitude_band
 from aircraft_state import update_plane
-from observation_store import ObservationStore
+from observation_store import ObservationStore, ReviewConflict
 from radio_decoder import FrameValidator, extract_message, text_from_bits
 
 #Współrzędne anteny
@@ -35,6 +36,7 @@ planes_lock = threading.Lock() #zabezpieczenie przed konfiktem wątków
 planes_data = {}
 
 app = Flask(__name__)
+app.config['ANOMALY_REVIEW_TOKEN'] = os.environ.get('PLANES_REVIEW_TOKEN', '')
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
@@ -354,7 +356,68 @@ def get_route_history(rowid):
 def api_anomalies():
     if observation_store is None:
         return jsonify({"events": [], "health": {"mode": "observe", "storage_ok": False}})
-    return jsonify({"events": observation_store.recent_events(), "health": observation_store.health()})
+    return jsonify({"events": observation_store.recent_events(), "health": observation_store.health(),
+                    "review_enabled": bool(app.config['ANOMALY_REVIEW_TOKEN'])})
+
+
+@app.route('/api/anomalies/<int:event_id>/review', methods=['GET', 'POST'])
+def api_anomaly_review(event_id):
+    token = app.config['ANOMALY_REVIEW_TOKEN']
+    if not token or observation_store is None:
+        return jsonify(error='Ocenianie zdarzeń jest wyłączone na tej stacji.'), 503
+    expected = ('Bearer ' + token).encode('utf-8')
+    supplied = request.headers.get('Authorization', '').encode('utf-8')
+    if not hmac.compare_digest(expected, supplied):
+        return jsonify(error='Nieprawidłowy klucz dostępu.'), 401
+    if request.method == 'GET':
+        result = observation_store.get_review(event_id)
+    else:
+        request.max_content_length = 12000
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify(error='Oczekiwano danych JSON.'), 400
+        try:
+            result = observation_store.save_review(event_id, payload.get('status'),
+                       payload.get('note'), payload.get('revision'))
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        except ReviewConflict:
+            return jsonify(error='Ocena została zmieniona w innym oknie. Wczytaj aktualną ocenę przed zapisem.'), 409
+    if result is None:
+        return jsonify(error='Zdarzenie nie istnieje lub wygasło.'), 404
+    response = jsonify(result)
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+@app.route('/api/anomalies/<int:event_id>/replay')
+def api_anomaly_replay(event_id):
+    result = observation_store.replay(event_id) if observation_store else None
+    if result is None:
+        return jsonify(error='Zdarzenie nie istnieje lub wygasło.'), 404
+    return jsonify(result)
+
+
+@app.route('/api/coverage-profile')
+def api_coverage_profile():
+    if observation_store is None:
+        return jsonify(error='Profil zasięgu nie jest jeszcze dostępny.'), 503
+    try:
+        band = int(request.args.get('band', '3'))
+        profile = observation_store.coverage_profile(band)
+    except ValueError:
+        return jsonify(error='Wybierz przedział wysokości od 0 do 4.'), 400
+    return jsonify(**profile, antenna={'lat': MY_LAT, 'lon': MY_LON})
+
+
+@app.route('/coverage')
+def coverage_page():
+    return render_template('coverage.html')
+
+
+@app.route('/anomalies/<int:event_id>')
+def incident_page(event_id):
+    return render_template('incident.html', event_id=event_id)
 
 
 @app.route('/anomalies')

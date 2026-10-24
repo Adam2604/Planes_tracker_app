@@ -1,0 +1,30 @@
+* { box-sizing: border-box; }
+body { margin: 0; background: #0f1720; color: #e2e8f0; font: 16px/1.6 system-ui, sans-serif; }
+main { max-width: 1180px; padding: 28px 20px; margin: auto; }
+a { color: #7dd3fc; }
+nav { display: flex; flex-wrap: wrap; gap: 20px; }
+h1 { margin-bottom: 8px; font-size: clamp(26px, 5vw, 38px); }
+h2 { font-size: 21px; }
+.muted { color: #a8bacb; }
+.panel, article { background: #182431; border: 1px solid #304456; border-radius: 12px; padding: 20px; margin: 18px 0; }
+.notice { border-left: 4px solid #7dd3fc; }
+.tag { display: inline-block; border: 1px solid currentColor; border-radius: 6px; padding: 2px 9px; margin-right: 10px; }
+.anomaly { color: #fbbf24; } .suspected { color: #fb923c; } .clear { color: #86efac; }
+.error { color: #fca5a5; }
+button, select, input, textarea { font: inherit; color: inherit; background: #101c29; border: 1px solid #60778d; border-radius: 6px; padding: 9px 12px; }
+button { cursor: pointer; } button:hover { background: #294155; } button:disabled { opacity: .45; cursor: default; }
+:focus-visible { outline: 3px solid #7dd3fc; outline-offset: 3px; }
+label { display: block; margin: 12px 0 6px; } textarea { width: 100%; resize: vertical; }
+input[type=password] { width: min(100%, 440px); }
+input[type=range] { width: 100%; padding: 0; }
+.row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.map { height: 450px; border-radius: 10px; background: #263444; margin-top: 16px; }
+.table-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #304456; white-space: nowrap; }
+.chart { width: 100%; height: auto; display: block; background: #101c29; border-radius: 8px; }
+.charts { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.leaflet-popup-content { color: #182431; }
+.status-line { min-height: 1.6em; }
+[hidden] { display: none !important; }
+@media (max-width: 650px) { main { padding: 18px 12px; } .map { height: 330px; } .charts { grid-template-columns: 1fr; } .panel { padding: 14px; } }

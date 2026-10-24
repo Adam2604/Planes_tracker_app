@@ -31,7 +31,18 @@ CREATE TABLE IF NOT EXISTS anomaly_events (
  analysis TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_anomaly_event_time ON anomaly_events(observed_at);
+CREATE TABLE IF NOT EXISTS anomaly_reviews (
+ event_id INTEGER PRIMARY KEY, station TEXT NOT NULL,
+ status TEXT NOT NULL CHECK(status IN ('pending','explained','suspicious')),
+ note TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL, updated_at REAL NOT NULL
+);
 """
+
+REVIEW_STATUSES = ('pending', 'explained', 'suspicious')
+
+
+class ReviewConflict(Exception):
+    """The event was reviewed by another client since it was opened."""
 
 
 class ObservationStore:
@@ -111,6 +122,7 @@ class ObservationStore:
             conn.execute("DELETE FROM observations WHERE observed_at<?", (now - self.settings.observation_days * 86400,))
             conn.execute("DELETE FROM coverage_samples WHERE day<?", (cutoff_day,))
             conn.execute("DELETE FROM anomaly_events WHERE observed_at<?", (cutoff,))
+            conn.execute("DELETE FROM anomaly_reviews WHERE event_id NOT IN (SELECT id FROM anomaly_events)")
         self.profiles = build_profiles(rows, self.settings)
         self.last_refresh = now
 
@@ -141,11 +153,78 @@ class ObservationStore:
 
     def recent_events(self, limit=100):
         with sqlite3.connect(self.path, timeout=10) as conn:
-            rows = conn.execute("""SELECT id,icao,track_id,observed_at,lat,lon,analysis
-                FROM anomaly_events WHERE station=? ORDER BY observed_at DESC, id DESC LIMIT ?""",
+            rows = conn.execute("""SELECT e.id,e.icao,e.track_id,e.observed_at,e.lat,e.lon,e.analysis,
+                COALESCE(r.status,'pending'),COALESCE(r.revision,0)
+                FROM anomaly_events e LEFT JOIN anomaly_reviews r ON r.event_id=e.id AND r.station=e.station
+                WHERE e.station=? ORDER BY e.observed_at DESC, e.id DESC LIMIT ?""",
                 (self.station, min(200, max(1, limit)))).fetchall()
         return [dict(id=r[0], icao=r[1], track_id=r[2], time=r[3], lat=r[4], lon=r[5],
-                     analysis=json.loads(r[6])) for r in rows]
+                     analysis=json.loads(r[6]), review_status=r[7], review_revision=r[8]) for r in rows]
+
+    def get_review(self, event_id):
+        with sqlite3.connect(self.path, timeout=10) as conn:
+            row = conn.execute("""SELECT COALESCE(r.status,'pending'), COALESCE(r.note,''),
+                COALESCE(r.revision,0), r.updated_at FROM anomaly_events e
+                LEFT JOIN anomaly_reviews r ON r.event_id=e.id AND r.station=e.station
+                WHERE e.id=? AND e.station=?""", (event_id, self.station)).fetchone()
+        return None if row is None else dict(status=row[0], note=row[1], revision=row[2], updated_at=row[3])
+
+    def save_review(self, event_id, status, note, revision):
+        if status not in REVIEW_STATUSES or not isinstance(note, str) or len(note) > 2000:
+            raise ValueError('Nieprawidłowa ocena lub notatka (maksymalnie 2000 znaków).')
+        if type(revision) is not int or revision < 0:
+            raise ValueError('Nieprawidłowa wersja oceny.')
+        with sqlite3.connect(self.path, timeout=10) as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            if not conn.execute('SELECT 1 FROM anomaly_events WHERE id=? AND station=?',
+                                (event_id, self.station)).fetchone():
+                return None
+            row = conn.execute('SELECT revision FROM anomaly_reviews WHERE event_id=? AND station=?',
+                               (event_id, self.station)).fetchone()
+            if revision != (row[0] if row else 0):
+                raise ReviewConflict()
+            updated = time.time()
+            conn.execute("""INSERT INTO anomaly_reviews VALUES (?,?,?,?,?,?)
+                ON CONFLICT(event_id) DO UPDATE SET status=excluded.status,note=excluded.note,
+                revision=excluded.revision,updated_at=excluded.updated_at""",
+                (event_id, self.station, status, note, revision+1, updated))
+        return dict(status=status, note=note, revision=revision+1, updated_at=updated)
+
+    def coverage_profile(self, band):
+        if type(band) is not int or not 0 <= band <= 4:
+            raise ValueError('Nieprawidłowy przedział wysokości.')
+        profiles = self.profiles  # One immutable snapshot per response.
+        sectors = []
+        for sector in range(36):
+            p = profiles.get((sector, band), dict(ready=False, tracks=0, days=0, p95_km=None, p99_km=None))
+            limit = (p['p99_km'] + max(self.settings.coverage_margin_km,
+                     p['p99_km'] * self.settings.coverage_margin_ratio)) if p['ready'] else None
+            sectors.append(dict(sector=sector, angle=sector*10, **p, threshold_km=limit))
+        return dict(band=band, sectors=sectors, updated_at=self.last_refresh,
+                    window_days=self.settings.window_days, min_tracks=self.settings.min_tracks,
+                    min_days=self.settings.min_days)
+
+    def replay(self, event_id):
+        with sqlite3.connect(self.path, timeout=10) as conn:
+            event = conn.execute('SELECT icao,track_id,observed_at,lat,lon,analysis FROM anomaly_events WHERE id=? AND station=?',
+                                 (event_id, self.station)).fetchone()
+            if event is None:
+                return None
+            start, end = event[2]-120, event[2]+120
+            rows = conn.execute("""SELECT observed_at,lat,lon,altitude,speed,v_type,accepted,analysis
+                FROM observations WHERE station=? AND track_id=? AND observed_at BETWEEN ? AND ?
+                ORDER BY observed_at,id LIMIT 5001""", (self.station, event[1], start, end)).fetchall()
+        points = []
+        for r in rows[:5000]:
+            a = json.loads(r[7])
+            points.append(dict(time=r[0], lat=r[1], lon=r[2], altitude=r[3], speed=r[4], v_type=r[5],
+                               accepted=bool(r[6]), break_route=a.get('break_route', False),
+                               status=a['status'], reasons=a.get('reasons', [])))
+        return dict(event=dict(id=event_id, icao=event[0], time=event[2], lat=event[3], lon=event[4],
+                               analysis=json.loads(event[5])), points=points, window_start=start, window_end=end,
+                    truncated=len(rows)>5000, has_before=any(p['time'] < event[2] for p in points),
+                    has_after=any(p['time'] > event[2] for p in points),
+                    observation_days=self.settings.observation_days)
 
     def health(self):
         return {"mode": "observe", "queued": self.pending.qsize() + len(self.retry_batch),

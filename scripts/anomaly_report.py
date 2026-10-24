@@ -20,10 +20,15 @@ def report(path):
             if analysis['status'] == 'suspected':
                 suspected.add(track)
             reasons.update(analysis['reason_codes'])
+        reviewed_events = {}
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='anomaly_reviews'").fetchone():
+            reviewed_events = dict(conn.execute('''SELECT r.status,COUNT(*) FROM anomaly_reviews r
+                JOIN anomaly_events e ON e.id=r.event_id AND e.station=r.station GROUP BY r.status''').fetchall())
     return dict(tracks=tracks, tracks_with_anomalies=len(affected),
                 tracks_with_suspicions=len(suspected), observations=observed[2],
                 first_observation=observed[0], last_observation=observed[1],
                 reason_observation_counts=dict(reasons),
+                saved_event_review_counts=reviewed_events,
                 note='Alarm frequency only. False-positive rate requires reviewed labels.')
 
 

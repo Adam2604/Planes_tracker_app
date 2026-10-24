@@ -1,5 +1,51 @@
 # Analiza anomalii — pierwsze wdrożenie
 
+## Przegląd zdarzeń, profil zasięgu i odtwarzanie
+
+Nowy pakiet dodaje trzy widoki/funkcje:
+
+- `/anomalies`: filtr ocen użytkownika i odnośniki do szczegółów. Filtr obejmuje
+  100 najnowszych zdarzeń, a nie całe archiwum.
+- `/coverage`: mapa P95/P99 oraz dokładnego progu używanego przez detektor,
+  z wyborem pięciu przedziałów wysokości. Tabela pokazuje wszystkie 36 sektorów,
+  liczbę sesji i dni. Niegotowe sektory nie są rysowane jako rzeczywisty zasięg;
+  ich szare znaczniki kierunku mają stałą długość 20 km. Dane są migawką tego
+  samego profilu, z którego korzysta detektor (odświeżanego co godzinę).
+- `/anomalies/<id>`: mapa i odtwarzanie obserwacji w oknie ±2 minuty wokół
+  zdarzenia, tempo 1×/5×/20×, wykresy wysokości i zgłoszonej prędkości. Typ
+  prędkości GS/IAS/TAS jest pokazany przy wybranej obserwacji. Luki w danych
+  nie są interpolowane, a zmiana typu prędkości przerywa linię wykresu.
+  Punkty odrzucone są pomarańczowe. Limit odpowiedzi wynosi 5000 punktów;
+  przy przekroczeniu strona informuje o przycięciu. Starsze niż 7 dni zdarzenia
+  mogą nie mieć już szczegółowej trasy, ale zachowują opis i ocenę do 30 dni.
+
+Oceny użytkownika („do sprawdzenia”, „wyjaśnione”, „podejrzane”) i notatki są
+przechowywane osobno w `anomaly_reviews`. Nowa tabela powstaje przy starcie,
+bez przebudowy istniejących tras. Oceny nie zmieniają punktacji, treningu ani
+wykluczania lotów. Raport `scripts/anomaly_report.py` pokazuje także liczbę
+zapisanych ocen zdarzeń (okno do 30 dni); statystyki obserwacji dotyczą do 7 dni.
+Ocena „wyjaśnione” nie jest automatycznie etykietą fałszywego alarmu.
+
+### Włączenie ocen i notatek
+
+Ustaw zmienną `PLANES_REVIEW_TOKEN` w środowisku procesu/usługi odbiornika na
+długi, losowy klucz i zrestartuj aplikację. Klucz wpisujesz w polu „Klucz dostępu
+do ocen” w szczegółach zdarzenia, następnie wybierasz „Wczytaj ocenę”.
+Bez skonfigurowanego klucza podgląd nadal działa, lecz edycja jest wyłączona.
+Do dostępu zdalnego używaj HTTPS. Aplikacja wysyła klucz w nagłówku Authorization,
+nie w URL, i nie zapisuje go w localStorage ani w bazie.
+
+Status oceny jest widoczny publicznie obok alarmu. Treść notatki jest dostępna
+wyłącznie przez endpoint wymagający klucza, z wyłączonym buforowaniem odpowiedzi.
+Notatka ma limit 2000 znaków. Równoczesne zmiany są chronione numerem rewizji:
+konflikt nie nadpisuje nowszej oceny. Ponowne „Wczytaj ocenę” zastępuje pola
+aktualnym zapisem — przed wczytaniem zachowaj własną niezapisaną notatkę.
+Ocena i notatka wygasają wraz ze zdarzeniem po 30 dniach.
+
+Testy API: `python -m pytest -q`. Testy logiki interfejsu bez przeglądarki:
+`node --test tests/test_analysis_ui.cjs` (Node.js 22). Nie zastępują oględzin
+map i układu na urządzeniu użytkownika.
+
 ## Uruchomienie
 
 1. Zatrzymaj poprzednią instancję odbiornika i wykonaj kopię `radar.db`.

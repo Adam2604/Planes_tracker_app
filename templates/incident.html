@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="pl"><head>
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Przegląd zdarzenia — Planes Tracker</title>
+    <link rel="stylesheet" href="/static/analysis.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script defer src="/static/analysis-common.js"></script><script defer src="/static/incident.js"></script>
+</head><body><main data-event-id="{{ event_id }}">
+    <nav><a href="/anomalies">← Zdarzenia</a><a href="/coverage">Wyuczony zasięg</a><a href="/">Mapa na żywo</a></nav>
+    <h1 id="title">Przegląd zdarzenia</h1><p id="event-summary" class="muted">Ładowanie danych…</p>
+    <p id="error" class="error" role="alert"></p>
+    <div class="panel"><h2>Odtwarzanie obserwacji</h2>
+        <p id="availability" role="status"></p>
+        <div class="row"><button id="play" disabled>Odtwórz</button><button id="jump-event" disabled>Przejdź do zdarzenia</button>
+            <label for="pace">Tempo <select id="pace"><option value="1">1×</option><option value="5" selected>5×</option><option value="20">20×</option></select></label></div>
+        <label for="timeline">Czas odtwarzania</label><input id="timeline" type="range" min="0" max="1" step="0.1" value="0" disabled>
+        <p id="position-time" aria-live="off">Brak wybranej obserwacji.</p>
+        <div id="incident-map" class="map" aria-label="Trasa podczas zdarzenia"></div>
+        <p class="muted">Niebieski: przyjęta trasa · pomarańczowy: odrzucone punkty i przerywane połączenia z ostatnią przyjętą pozycją.
+            Znacznik „Zdarzenie” pokazuje pozycję zgłoszoną w chwili alarmu. Przerwy w odbiorze nie są uzupełniane.</p>
+        <div class="charts">
+            <div><h3>Wysokość [m]</h3><svg id="altitude-chart" class="chart" viewBox="0 0 520 220" role="img" aria-label="Wykres wysokości"></svg></div>
+            <div><h3>Prędkość zgłoszona [km/h]</h3><svg id="speed-chart" class="chart" viewBox="0 0 520 220" role="img" aria-label="Wykres prędkości"></svg></div>
+        </div>
+        <p class="muted">Wykresy obejmują całe dostępne okno. Biały kursor: czas odtwarzania · czerwona linia: zdarzenie · pomarańczowe punkty: odrzucone pozycje. Brak wartości przerywa linię.</p>
+    </div>
+    <section class="panel" aria-labelledby="review-heading"><h2 id="review-heading">Ocena użytkownika</h2>
+        <p class="muted">Ocena i notatka pomagają w przeglądzie. Nie zmieniają wyniku detektora ani danych treningowych. Notatka jest dostępna tylko z kluczem dostępu.</p>
+        <label for="review-key">Klucz dostępu do ocen</label><input id="review-key" type="password" autocomplete="off">
+        <button id="load-review">Wczytaj ocenę</button>
+        <p class="muted">Ponowne wczytanie zastępuje treść pól aktualnym zapisem ze stacji.</p>
+        <p id="review-message" class="status-line" role="status">Klucz pozostaje tylko w tym otwartym oknie.</p>
+        <form id="review-form" hidden>
+            <label for="review-status">Twoja ocena</label><select id="review-status"><option value="pending">Do sprawdzenia</option><option value="explained">Wyjaśnione</option><option value="suspicious">Podejrzane</option></select>
+            <label for="review-note">Notatka (do 2000 znaków)</label><textarea id="review-note" maxlength="2000" rows="4"></textarea>
+            <button id="save-review" type="submit">Zapisz ocenę</button>
+        </form>
+    </section>
+</main></body></html>

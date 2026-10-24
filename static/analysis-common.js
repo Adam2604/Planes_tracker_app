@@ -13,6 +13,27 @@ window.Analysis = {
         return data;
     },
     time(value) { return new Date(value * 1000).toLocaleString('pl-PL'); },
+    navigationText(q, now) {
+        if (!q) return 'Jakość ADS-B: brak danych';
+        now = now ?? q.time;
+        const aged = (at, ttl) => at == null || now-at > ttl || now < at;
+        const versionStale = q.version_stale || aged(q.version_updated_at, 60);
+        const version = q.version == null ? 'nieznana wersja' : `wersja ${q.version}${versionStale?' (nieaktualna)':''}`;
+        if (!q.supported) return `Jakość ADS-B: ${version} · wskaźniki niedostępne`;
+        const fields = [['nic','NIC',10],['nac_p','NACp',60],['nac_v','NACv',10],['sil','SIL',60]];
+        const values = fields.map(([key,label,ttl]) => {
+            const f=q[key];
+            return `${label}: ${f?.value == null ? 'brak danych' : f.value+((f.stale || versionStale || aged(f.updated_at,ttl))?' (nieaktualne)':'')}`;
+        });
+        const basis = {hour:'na godzinę',sample:'na próbkę',unknown:'nieokreślona'}[q.sil_basis] || 'nieokreślona';
+        return `ADS-B ${version} · ${values.join(' · ')} · podstawa SIL: ${basis}`;
+    },
+    receiverLabels: {not_started:'Nie uruchomiono', running:'Odbiór działa', quiet:'Odczyt działa, brak świeżych ramek',
+        stalled:'Przerwa w odczycie próbek', error:'Błąd odbiornika', stopped:'Odbiornik zatrzymany'},
+    receiverText(h) {
+        if (!h) return 'Odbiornik: brak danych';
+        return `${this.receiverLabels[h.state] || h.state} · ${h.accepted_per_second ?? '—'} ramek/s · CRC DF17/18: ${h.crc_valid_percent == null?'brak danych':h.crc_valid_percent+'%'} · ostatni odczyt: ${h.read_age_s == null?'brak':h.read_age_s+' s temu'}`;
+    },
     reviewLabels: {pending: 'Do sprawdzenia', explained: 'Wyjaśnione', suspicious: 'Podejrzane'},
     // Great-circle endpoint for a coverage wedge, distance in kilometres.
     destination(lat, lon, degrees, km) {

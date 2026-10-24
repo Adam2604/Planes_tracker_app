@@ -30,12 +30,14 @@ class FrameValidator:
         self.known = {}
 
     def validate(self, message, pms, now):
+        self.last_check = dict(crc_checked=False, crc_ok=False)
         if len(message) not in (14, 28):
             return None
         df = int(message[:2], 16) >> 3
         if len(message) != (28 if df >= 16 else 14):
             return None
         remainder = pms.crc(message)
+        self.last_check = dict(crc_checked=df in (17, 18), crc_ok=remainder == 0)
         if df == 17:
             if remainder != 0:
                 return None

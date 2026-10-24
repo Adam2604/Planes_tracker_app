@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="pl"><head>
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Kondycja odbiornika — Planes Tracker</title>
+    <link rel="stylesheet" href="/static/analysis.css">
+    <script defer src="/static/analysis-common.js"></script><script defer src="/static/receiver.js"></script>
+</head><body><main>
+    <nav><a href="/">Mapa na żywo</a><a href="/anomalies">Zdarzenia</a><a href="/coverage">Wyuczony zasięg</a></nav>
+    <h1>Kondycja odbiornika</h1>
+    <p class="muted">Dane odświeżają się co 5 sekund. Liczniki i tempo dotyczą ostatnich 60 sekund lub czasu od uruchomienia, jeśli jest krótszy.</p>
+    <p id="error" class="error" role="alert"></p>
+    <section class="panel"><h2 id="receiver-state">Ładowanie danych…</h2><p id="updated" class="muted"></p>
+        <div class="charts" id="metrics"></div><p id="receiver-error" class="error"></p>
+        <p class="muted">CRC obejmuje tylko DF17/18. Poprawne CRC nie uwierzytelnia nadawcy. Inne formaty Mode S mają odmienne reguły walidacji.
+            Poziom tła to mediana amplitudy próbek w dB względem amplitudy 1, a nie kalibrowany pomiar dBm; zależy także od ustawienia wzmocnienia.
+            Przerwa w odczycie oznacza odstęp powyżej 2 s, nie pomiar liczby utraconych próbek.</p>
+    </section>
+    <section class="panel"><h2>Zapis danych</h2><p id="storage" role="status"></p></section>
+    <section class="panel"><h2>Historia z ostatniej godziny</h2><p id="history-summary" class="muted"></p>
+        <div class="table-scroll"><table><thead><tr><th>Czas</th><th>Stan</th><th>Ramki/s</th><th>Poprawne CRC DF17/18</th><th>Tło [dB wzgl.]</th><th>Wiek odczytu [s]</th></tr></thead><tbody id="history"></tbody></table></div>
+    </section>
+</main></body></html>

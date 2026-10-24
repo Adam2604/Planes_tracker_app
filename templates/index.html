@@ -156,6 +156,7 @@
         <div class="stat-row"><span>Blisko (&lt; 5km):</span> <span id="s-close" class="stat-val">0</span></div>
         <div class="stat-row"><span>Wojskowe (Ghost):</span> <span id="s-mil" class="stat-val">NIE</span></div>
         <div class="stat-row"><a href="/anomalies" style="color: #ffb74d">⚠️ Anomalie:</a> <span id="s-spoof" class="stat-val">0</span></div>
+        <div class="stat-row"><a href="/receiver" style="color: #7dd3fc">Kondycja odbiornika</a></div>
         <div style="margin-top: 10px; font-size: 12px; color: #aaa;">Najrzadszy dziś:</div>
         <div id="s-rare" class="stat-val highlight" style="font-size: 13px;">Brak danych</div>
     </div>
@@ -167,6 +168,7 @@
         <a href="/list" class="nav-btn btn-list">📋 Lista</a>
     </div>
 
+    <script src="/static/analysis-common.js"></script>
     <script>
         // A. Widok Satelitarny
         var satelita = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
@@ -289,7 +291,7 @@
                 }
                 planes.forEach(p => {
                     if (p.lat != null && p.lon != null) {
-                        let popupText = `<b>${escapeHtml(p.callsign || p.icao)}</b><br>${escapeHtml(p.model)}<br>Wys: ${escapeHtml(p.altitude)} m | Pręd: ${escapeHtml(p.speed)} km/h<br>Odl: ${escapeHtml(p.dist)} km` + anomalyPopup(p.anomaly);
+                        let popupText = `<b>${escapeHtml(p.callsign || p.icao)}</b><br>${escapeHtml(p.model)}<br>Wys: ${escapeHtml(p.altitude)} m | Pręd: ${escapeHtml(p.speed)} km/h<br>Odl: ${escapeHtml(p.dist)} km` + anomalyPopup(p.anomaly) + '<br>'+escapeHtml(Analysis.navigationText(p.navigation));
                         let icon = createPlaneIcon(p.heading, p.category);
                         if (planesMarkers[p.icao]) {
                             let marker = planesMarkers[p.icao];

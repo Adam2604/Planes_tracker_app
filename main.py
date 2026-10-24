@@ -11,10 +11,13 @@ import logging
 import signal
 import atexit
 import hmac
+import sqlite3
 from anomaly import TrackDetector, Settings, calculate_distance, bearing, altitude_band
 from aircraft_state import update_plane
 from observation_store import ObservationStore, ReviewConflict
 from radio_decoder import FrameValidator, extract_message, text_from_bits
+from navigation_quality import NavigationQuality
+from receiver_health import ReceiverHealth
 
 #Współrzędne anteny
 MY_LAT = 51.978
@@ -25,6 +28,8 @@ STATION_PROFILE = os.environ.get("PLANES_STATION_PROFILE", "default")
 STATION_ID = f"{MY_LAT:.6f},{MY_LON:.6f}:{STATION_PROFILE}"
 DETECTOR_SETTINGS = Settings()
 detectors = {}
+navigation_states = {}
+receiver_health = ReceiverHealth()
 observation_store = None
 receiver_stop = threading.Event()
 receiver_thread = None
@@ -78,6 +83,8 @@ def decode_details(hex_msg):
     now = time.time()
     if tc is None:
         return
+    if tc == 31 or tc == 19 or 9 <= tc <= 18:
+        update_navigation(icao, hex_msg, now, pms.adsb)
     if 1 <= tc <= 4:
         actualize_plane(icao, {"callsign": pms.adsb.callsign(hex_msg).strip(),
                                "category": pms.adsb.category(hex_msg)})
@@ -106,6 +113,31 @@ def decode_details(hex_msg):
             })
 
 
+def update_navigation(icao, message, now, adsb):
+    row = None
+    with planes_lock:
+        state = navigation_states.get(icao) or NavigationQuality()
+        if not state.update(message, now, adsb):
+            return
+        navigation_states[icao] = state
+        plane = update_plane(planes, planes_data, icao, {}, now)
+        quality = state.snapshot(now, adsb)
+        plane['navigation'] = quality
+        if observation_store and state.should_save(quality, now):
+            row = dict(kind='navigation', track_id=plane['track_id'], icao=icao,
+                       time=now, quality=quality, raw_message=message)
+    if row is not None:
+        observation_store.submit(row)
+
+
+def navigation_snapshot(icao, now):
+    state = navigation_states.get(icao)
+    if state is None:
+        return None
+    import pyModeS as pms
+    return state.snapshot(now, pms.adsb)
+
+
 def process_position(icao, lat, lon, now=None, raw_message=None):
     now = time.time() if now is None else now
     if not (math.isfinite(lat) and math.isfinite(lon) and -90 <= lat <= 90 and -180 <= lon <= 180):
@@ -127,6 +159,8 @@ def process_position(icao, lat, lon, now=None, raw_message=None):
         profile = observation_store.profiles.get((sector, band)) if observation_store else None
         detector = detectors.setdefault(icao, TrackDetector(DETECTOR_SETTINGS))
         analysis = detector.observe(point, profile)
+        analysis['navigation'] = navigation_snapshot(icao, now)
+        analysis['receiver'] = receiver_health.snapshot(now)
         previous = plane.get("anomaly", {})
         point["event"] = ((analysis["status"], analysis["reasons"]) !=
                           (previous.get("status", "clear"), previous.get("reasons", [])))
@@ -170,6 +204,7 @@ def cleaner():
                 data_base.save_flight(planes[k])
                 del planes[k]
                 detectors.pop(k, None)
+                navigation_states.pop(k, None)
                 if k in cpr_buffer:
                     del cpr_buffer[k]
 
@@ -202,26 +237,29 @@ def watchdog():
         
 
 def radio_loop():
-    from rtlsdr import RtlSdr
-    import numpy as np
-    import pyModeS as pms
-    validator = FrameValidator()
-    tail = np.array([], dtype=float)
-    #Konfiguracja
-    sdr = RtlSdr()
-    sdr.sample_rate = 2000000
-    sdr.center_freq = 1090000000
-    sdr.freq_correction = 1
-    sdr.gain = 49.6
-
     global last_packet_time
-
-    print("Czekam na sygnał")
+    sdr = None
+    receiver_health.start()
     try:
+        from rtlsdr import RtlSdr
+        import numpy as np
+        import pyModeS as pms
+        validator = FrameValidator()
+        tail = np.array([], dtype=float)
+        sdr = RtlSdr()
+        sdr.sample_rate = 2000000
+        sdr.center_freq = 1090000000
+        sdr.freq_correction = 1
+        sdr.gain = 49.6
+        print("Czekam na sygnał")
         while not receiver_stop.is_set():
             samples = sdr.read_samples(512 * 1024)  # Większy bufor = mniej luk w odczycie
-            mag = np.concatenate((tail, np.abs(samples)))
+            magnitudes = np.abs(samples)
+            receiver_health.read(float(np.median(magnitudes)) if len(magnitudes) else 0)
+            mag = np.concatenate((tail, magnitudes))
             tail = mag[-239:].copy()  # Preserve frames crossing read boundaries.
+            if len(mag) < 17:
+                continue
 
             #Wykrywanie preambuły
             p0 = mag[: -16] #Sygnał w chwili T
@@ -258,6 +296,7 @@ def radio_loop():
                     continue
                 try:
                     frame = validator.validate(hex_msg, pms, time.time())
+                    receiver_health.frame(accepted=frame is not None, **validator.last_check)
                     if frame is None:
                         continue
                     df, icao = frame
@@ -271,11 +310,22 @@ def radio_loop():
                         # DF21 carries identity, not altitude; DF11 only confirms presence.
                         actualize_plane(icao, {})
                 except (ValueError, TypeError, RuntimeError, IndexError):
+                    receiver_health.frame(decode_error=True)
                     logging.debug("Rejected undecodable frame %s", hex_msg, exc_info=True)
     except KeyboardInterrupt:
         print("Zakończono odbiór sygnału.")
+    except Exception as exc:
+        receiver_health.failed(exc)
+        logging.exception('Receiver stopped after an error')
     finally:
-        sdr.close()
+        try:
+            if sdr is not None:
+                sdr.close()
+        except Exception as exc:
+            receiver_health.failed(exc)
+            logging.exception('Cannot close receiver')
+        finally:
+            receiver_health.stop()
 
 cleanup_done = False
 
@@ -312,6 +362,7 @@ def get_data():
         planes_for_map = []
         for plane in planes.values():
             map_plane = {k: v for k, v in plane.items() if k not in ("route", "suspect_segments")}
+            map_plane['navigation'] = navigation_snapshot(plane['icao'], time.time())
             if "anomaly" in plane:
                 map_plane["anomaly"] = dict(plane["anomaly"],
                     stale=time.time() - plane["anomaly"]["evaluated_at"] > 15)
@@ -358,6 +409,24 @@ def api_anomalies():
         return jsonify({"events": [], "health": {"mode": "observe", "storage_ok": False}})
     return jsonify({"events": observation_store.recent_events(), "health": observation_store.health(),
                     "review_enabled": bool(app.config['ANOMALY_REVIEW_TOKEN'])})
+
+
+@app.route('/api/receiver-health')
+def api_receiver_health():
+    history = []
+    storage = observation_store.health() if observation_store else dict(storage_ok=False, queued=0, dropped=0)
+    if observation_store:
+        try:
+            history = observation_store.receiver_history()
+        except sqlite3.Error:
+            logging.exception('Cannot read receiver history')
+            storage = dict(storage, storage_ok=False)
+    return jsonify(receiver=receiver_health.snapshot(), storage=storage, history=history)
+
+
+@app.route('/receiver')
+def receiver_page():
+    return render_template('receiver.html')
 
 
 @app.route('/api/anomalies/<int:event_id>/review', methods=['GET', 'POST'])
@@ -522,7 +591,8 @@ if __name__ == "__main__":
 
     load_csv_data()
     data_base.init_db()
-    observation_store = ObservationStore(data_base.DB_NAME, STATION_ID, DETECTOR_SETTINGS)
+    observation_store = ObservationStore(data_base.DB_NAME, STATION_ID, DETECTOR_SETTINGS,
+                                         telemetry_provider=receiver_health.snapshot)
     observation_store.initialize()
     observation_store.start()
     data_base.archive_past_days()

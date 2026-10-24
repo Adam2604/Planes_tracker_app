@@ -142,6 +142,53 @@ zakresem tej wersji detektora. Analizowane są pozycje airborne TC9–18.
 
 ## Sprawdzenie i strojenie
 
+### Jakość nawigacji i kondycja odbiornika
+
+- Po aktualizacji uruchom ponownie aplikację. Inicjalizacja SQLite dodaje tabele
+  `navigation_updates` i `receiver_samples` bez przebudowy istniejących rekordów.
+  Obie mają retencję 7 dni. Nowe zdarzenia zachowują również migawkę jakości
+  i odbiornika we własnym opisie przez 30 dni; starym zdarzeniom nie dopisuje się danych.
+- `/data` i okienko samolotu pokazują NIC, NACp, NACv i SIL. Wersja ADS-B pochodzi
+  z TC31 subtype 0. Obsługiwane są wersje 1 i 2; brak TC31, wersja 0 i wersje
+  zarezerwowane oznaczają brak obsługiwanych wskaźników, a nie wartości zerowe.
+  NACp i SIL pochodzą z TC31, NACv z TC19 subtype 1–4, NIC z TC9–18 oraz
+  suplementów odpowiednich dla wersji. TC29, status powierzchniowy i TC20–22
+  pozostają poza tym zakresem. Zarezerwowane wartości oznaczają brak danych.
+- Status i wersja wygasają po 60 s, NIC i NACv po 10 s bez aktualizacji pozycji
+  lub prędkości. Stara wartość pozostaje widoczna jako nieaktualna. Wersja 1 nie
+  otrzymuje zgadywanej podstawy SIL; wersja 2 rozróżnia podstawę na godzinę/próbkę.
+  Zmiana wersji usuwa zapamiętaną pozycję i prędkość z modułu jakości.
+- Zmiany są porównywane tylko między świeżymi wartościami tej samej wersji,
+  a SIL dodatkowo tej samej podstawy. Zapisywana jest każda zmiana wartości/stanu
+  oraz, przy dalszym odbiorze, migawka co 5 s. Zapis nie wymaga nowej pozycji CPR.
+  W pamięci pozostaje maksymalnie 20 ostatnich zmian z 2 minut; szczegóły trafiają
+  do historii. Na stronie zdarzenia można przejrzeć spadki/wzrosty i przesuwać
+  czas odtwarzania również poza ostatnią dostępną pozycję.
+- Te wskaźniki są deklaracjami nadajnika, nie dowodem autentyczności ani przyczyny
+  pogorszenia nawigacji. Ten etap nie dodaje za nie punktów spoofingu i nie zmienia
+  reguł treningu profilu. Dokumentacja formatu:
+  [ADS-B uncertainty indicators](https://mode-s.org/1090mhz/content/ads-b/7-uncertainty.html).
+- `/receiver` i `/api/receiver-health` pokazują tempo zaakceptowanych ramek,
+  kandydatów z wykrytą preambułą, błędy dekodowania, wiek odczytu i poprawnej ramki,
+  przerwy oraz kolejkę zapisu. Okno wynosi 60 s (krótsze po starcie).
+  Odsetek poprawnego CRC ma w mianowniku wyłącznie sprawdzone DF17/18;
+  brak prób daje brak danych, nie 0%. Akceptacja ramki i CRC to osobne liczniki.
+- Tło to `20*log10(mediana(abs(próbki)))`, dB względem amplitudy 1, nie dBm ani
+  skalibrowany pomiar zakłóceń. Zero lub nieważny wynik daje brak danych. Wartość
+  znika po 5 s bez odczytu. Zmiana wzmocnienia wpływa na tę miarę.
+- Przerwa odczytu to odstęp ponad 2 s między odebranymi buforami. Licznik nie
+  mierzy utraconych próbek sprzętowych. Po 5 s bez odczytu stan wskazuje przerwę;
+  przy świeżym odczycie i 15 s bez zaakceptowanej ramki wskazuje ciszę radiową.
+  Błędy uruchomienia/odczytu SDR są widoczne w panelu.
+- Wątek zapisu pobiera stan odbiornika co około 5 s niezależnie od ramek, również
+  podczas błędu SDR. Panel pokazuje ostatnią godzinę (do 720 próbek), a odtwarzanie
+  zdarzenia stan odbiornika z okna ±2 minuty. Awaria całego procesu nie zapisuje próbek.
+
+Po wdrożeniu na stacji sprawdź `/receiver`, obecność nowych rekordów po kilku
+sekundach i jakość samolotu nadającego TC31. Testy automatyczne używają symulowanego
+SDR; poziom tła i zachowanie rzeczywistego urządzenia wymagają obserwacji na stacji.
+Testy interfejsu: `node --test tests/test_analysis_ui.cjs`.
+
 Uruchom `python -m pytest -q` po zainstalowaniu `requirements-dev.txt`.
 Testy wywołują kod produkcyjny, używają tymczasowych baz i znanych ramek Mode S.
 

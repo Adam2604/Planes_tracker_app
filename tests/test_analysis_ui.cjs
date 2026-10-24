@@ -94,3 +94,42 @@ test('expired observations leave event description and review accessible',async(
     assert.match(h.element('availability').textContent,/Brak szczegółowych obserwacji/);
     assert.match(h.element('title').textContent,/ABC123/);
 });
+
+test('navigation distinguishes missing, zero and stale values during replay',()=>{
+    const h=harness(), A=h.context.Analysis;
+    assert.match(A.navigationText(null),/brak danych/);
+    const q={time:100,version:2,version_updated_at:100,supported:true,sil_basis:'hour',
+        nic:{value:8,updated_at:100},nac_p:{value:0,updated_at:100},nac_v:{value:null},sil:{value:3,updated_at:100}};
+    assert.match(A.navigationText(q,100),/NACp: 0 · NACv: brak danych/);
+    assert.match(A.navigationText(q,111),/NIC: 8 \(nieaktualne\)/);
+    assert.doesNotMatch(A.navigationText(q,111),/NACp: 0 \(nieaktualne\)/);
+    assert.match(A.navigationText(q,161),/wersja 2 \(nieaktualna\)/);
+});
+
+test('receiver displays empty history, zero rates and errors as text',async()=>{
+    const h=harness(()=>({receiver:{time:100,state:'error',error:'<script>USB failed</script>',window_seconds:60,
+        accepted_per_second:0,candidates_per_second:0,crc_valid_percent:null,read_age_s:null,valid_frame_age_s:null,
+        noise_db_relative:null,read_gaps:0,max_read_gap_s:0,window:{crc_ok:0,crc_checked:0,decode_errors:0}},
+        storage:{storage_ok:false,queued:3,dropped:1},history:[]}));
+    h.run('receiver.js');await h.settle();
+    assert.match(h.element('receiver-state').textContent,/Błąd odbiornika/);
+    assert.equal(h.element('receiver-error').textContent,'<script>USB failed</script>');
+    assert.equal(h.element('metrics').children.length,8);
+    assert.match(text(h.element('metrics')),/brak danych/);
+    assert.match(h.element('storage').textContent,/oczekujące rekordy: 3/);
+    assert.match(h.element('history-summary').textContent,/Brak zapisanych próbek/);
+});
+
+test('quality replay continues after final position and shows degradation once',async()=>{
+    const quality={time:110,version:2,version_updated_at:110,supported:true,nac_p:{value:2,updated_at:110},
+        changes:[{time:110,field:'nac_p',before:9,after:2,direction:'down'}]};
+    const h=harness(()=>({event:{time:100,icao:'ABC123',analysis:{label:'Anomalia',reasons:[]}},
+        points:[{time:100,lat:52,lon:17,accepted:true}],navigation:[{time:110,quality},{time:115,quality}],
+        receiver:[],window_start:-20,window_end:220,observation_days:7}));
+    h.run('incident.js');await h.settle();
+    assert.equal(Number(h.element('timeline').max),115);
+    assert.equal(h.element('quality-changes').children.length,1);
+    h.element('timeline').value=115;h.element('timeline').listeners.input();
+    assert.match(h.element('selected-navigation').textContent,/NACp: 2/);
+    assert.match(text(h.element('quality-changes')),/Spadek/);
+});

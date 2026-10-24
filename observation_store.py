@@ -36,6 +36,17 @@ CREATE TABLE IF NOT EXISTS anomaly_reviews (
  status TEXT NOT NULL CHECK(status IN ('pending','explained','suspicious')),
  note TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL, updated_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS navigation_updates (
+ id INTEGER PRIMARY KEY, station TEXT NOT NULL, track_id TEXT NOT NULL,
+ icao TEXT NOT NULL, observed_at REAL NOT NULL, quality TEXT NOT NULL, raw_message TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_navigation_track_time ON navigation_updates(station,track_id,observed_at);
+CREATE INDEX IF NOT EXISTS idx_navigation_time ON navigation_updates(observed_at);
+CREATE TABLE IF NOT EXISTS receiver_samples (
+ id INTEGER PRIMARY KEY, station TEXT NOT NULL, observed_at REAL NOT NULL, health TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_receiver_station_time ON receiver_samples(station,observed_at);
+CREATE INDEX IF NOT EXISTS idx_receiver_time ON receiver_samples(observed_at);
 """
 
 REVIEW_STATUSES = ('pending', 'explained', 'suspicious')
@@ -46,7 +57,7 @@ class ReviewConflict(Exception):
 
 
 class ObservationStore:
-    def __init__(self, path, station, settings=Settings()):
+    def __init__(self, path, station, settings=Settings(), telemetry_provider=None):
         self.path, self.station, self.settings = path, station, settings
         self.pending = queue.Queue(maxsize=20000)
         self.profiles = {}
@@ -57,6 +68,8 @@ class ObservationStore:
         self.flush_lock = threading.Lock()
         self.retry_batch = []
         self.last_refresh = 0
+        self.telemetry_provider = telemetry_provider
+        self.last_telemetry = None
 
     def initialize(self):
         with sqlite3.connect(self.path, timeout=10) as conn:
@@ -85,6 +98,15 @@ class ObservationStore:
             try:
                 with sqlite3.connect(self.path, timeout=10) as conn:
                     for row in batch:
+                        if row.get('kind') == 'navigation':
+                            conn.execute('INSERT INTO navigation_updates (station,track_id,icao,observed_at,quality,raw_message) VALUES (?,?,?,?,?,?)',
+                                (self.station, row['track_id'], row['icao'], row['time'],
+                                 json.dumps(row['quality'], allow_nan=False), row.get('raw_message')))
+                            continue
+                        if row.get('kind') == 'receiver':
+                            conn.execute('INSERT INTO receiver_samples (station,observed_at,health) VALUES (?,?,?)',
+                                (self.station, row['time'], json.dumps(row['health'], allow_nan=False)))
+                            continue
                         a = row["analysis"]
                         encoded = json.dumps(a, ensure_ascii=False, allow_nan=False)
                         conn.execute("""INSERT INTO observations
@@ -120,6 +142,8 @@ class ObservationStore:
             rows = conn.execute("""SELECT sector,band,track_id,day,max_distance FROM coverage_samples
                 WHERE station=? AND day>=? AND day<?""", (self.station, cutoff_day, today)).fetchall()
             conn.execute("DELETE FROM observations WHERE observed_at<?", (now - self.settings.observation_days * 86400,))
+            conn.execute("DELETE FROM navigation_updates WHERE observed_at<?", (now - self.settings.observation_days * 86400,))
+            conn.execute("DELETE FROM receiver_samples WHERE observed_at<?", (now - self.settings.observation_days * 86400,))
             conn.execute("DELETE FROM coverage_samples WHERE day<?", (cutoff_day,))
             conn.execute("DELETE FROM anomaly_events WHERE observed_at<?", (cutoff,))
             conn.execute("DELETE FROM anomaly_reviews WHERE event_id NOT IN (SELECT id FROM anomaly_events)")
@@ -132,6 +156,7 @@ class ObservationStore:
 
     def _worker(self):
         while not self.stop_event.wait(1):
+            self.collect_telemetry()
             self.flush()
             if time.time() - self.last_refresh >= 3600:
                 try:
@@ -139,6 +164,19 @@ class ObservationStore:
                 except sqlite3.Error as exc:
                     self.last_error = str(exc)
                     logging.exception("Cannot refresh coverage profile")
+
+    def collect_telemetry(self, now=None):
+        now = time.time() if now is None else now
+        if self.telemetry_provider and (self.last_telemetry is None or now-self.last_telemetry >= 5):
+            self.submit(dict(kind='receiver', time=now, health=self.telemetry_provider()))
+            self.last_telemetry = now
+
+    def receiver_history(self, now=None):
+        now = time.time() if now is None else now
+        with sqlite3.connect(self.path, timeout=10) as conn:
+            rows = conn.execute('SELECT observed_at,health FROM receiver_samples WHERE station=? AND observed_at BETWEEN ? AND ? ORDER BY observed_at DESC,id DESC LIMIT 720',
+                                (self.station, now-3600, now)).fetchall()
+        return [dict(time=r[0], health=json.loads(r[1])) for r in reversed(rows)]
 
     def close(self):
         self.stop_event.set()
@@ -214,16 +252,24 @@ class ObservationStore:
             rows = conn.execute("""SELECT observed_at,lat,lon,altitude,speed,v_type,accepted,analysis
                 FROM observations WHERE station=? AND track_id=? AND observed_at BETWEEN ? AND ?
                 ORDER BY observed_at,id LIMIT 5001""", (self.station, event[1], start, end)).fetchall()
+            navigation = conn.execute('SELECT observed_at,quality FROM navigation_updates WHERE station=? AND track_id=? AND observed_at BETWEEN ? AND ? ORDER BY observed_at,id LIMIT 5001',
+                                      (self.station, event[1], start, end)).fetchall()
+            receiver = conn.execute('SELECT observed_at,health FROM receiver_samples WHERE station=? AND observed_at BETWEEN ? AND ? ORDER BY observed_at,id LIMIT 1000',
+                                    (self.station, start, end)).fetchall()
         points = []
         for r in rows[:5000]:
             a = json.loads(r[7])
             points.append(dict(time=r[0], lat=r[1], lon=r[2], altitude=r[3], speed=r[4], v_type=r[5],
                                accepted=bool(r[6]), break_route=a.get('break_route', False),
-                               status=a['status'], reasons=a.get('reasons', [])))
+                               status=a['status'], reasons=a.get('reasons', []),
+                               navigation=a.get('navigation'), receiver=a.get('receiver')))
         return dict(event=dict(id=event_id, icao=event[0], time=event[2], lat=event[3], lon=event[4],
                                analysis=json.loads(event[5])), points=points, window_start=start, window_end=end,
                     truncated=len(rows)>5000, has_before=any(p['time'] < event[2] for p in points),
                     has_after=any(p['time'] > event[2] for p in points),
+                    navigation=[dict(time=r[0], quality=json.loads(r[1])) for r in navigation[:5000]],
+                    navigation_truncated=len(navigation)>5000,
+                    receiver=[dict(time=r[0], health=json.loads(r[1])) for r in receiver],
                     observation_days=self.settings.observation_days)
 
     def health(self):

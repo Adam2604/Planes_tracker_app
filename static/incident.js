@@ -50,6 +50,13 @@
     function draw() {
         const t=Number(slider.value), visible=payload.points.filter(p=>p.time<=t), last=visible[visible.length-1];
         const fmt=v=>v==null?'brak danych':v;
+        const nav=[...(payload.navigation || []).map(r=>({time:r.time,quality:r.quality})),
+            ...visible.filter(p=>p.navigation).map(p=>({time:p.time,quality:p.navigation}))]
+            .filter(r=>r.time<=t).sort((a,b)=>a.time-b.time).pop();
+        byId('selected-navigation').textContent=A.navigationText(nav?.quality,t);
+        const receiver=[...(payload.receiver || []),...visible.filter(p=>p.receiver).map(p=>({time:p.time,health:p.receiver}))]
+            .filter(r=>r.time<=t).sort((a,b)=>a.time-b.time).pop();
+        byId('selected-receiver').textContent=receiver ? `${A.receiverText(receiver.health)} · próbka sprzed ${(t-receiver.time).toFixed(1)} s` : 'Odbiornik: brak danych';
         byId('position-time').textContent=last ? `${A.time(t)} · obserwacja sprzed ${(t-last.time).toFixed(1)} s · wysokość: ${fmt(last.altitude)} m · prędkość: ${fmt(last.speed)} km/h (${last.v_type||'brak typu'}) · ${last.accepted?'punkt przyjęty':'punkt odrzucony'}` : `${A.time(t)} · brak wcześniejszej obserwacji`;
         if(layers) {
             layers.clearLayers();
@@ -87,6 +94,23 @@
         try {
             payload=await A.json(`/api/anomalies/${id}/replay`);
             const e=payload.event;
+            byId('event-navigation').textContent=A.navigationText(e.analysis.navigation,e.time);
+            byId('event-receiver').textContent=A.receiverText(e.analysis.receiver);
+            byId('selected-navigation').textContent='Brak wybranej obserwacji.';
+            byId('selected-receiver').textContent='Brak wybranej obserwacji.';
+            const changes=new Map();
+            for(const q of [e.analysis.navigation,...(payload.navigation || []).map(r=>r.quality)])
+                for(const c of q?.changes || [])
+                    if(c.time>=payload.window_start && c.time<=payload.window_end)
+                        changes.set(`${c.time}:${c.field}:${c.before}:${c.after}`,c);
+            byId('quality-availability').textContent=`${changes.size} zmian między świeżymi wartościami tej samej wersji ADS-B. `+
+                (payload.navigation_truncated?'Historia jakości została ograniczona do 5000 próbek.':'Brak zmiany nie oznacza potwierdzonej poprawności nawigacji.');
+            byId('quality-changes').replaceChildren(...[...changes.values()].sort((a,b)=>a.time-b.time).map(c=>{
+                const tr=A.element('tr','');
+                for(const value of [A.time(c.time),{nic:'NIC',nac_p:'NACp',nac_v:'NACv',sil:'SIL'}[c.field],c.before,c.after,c.direction==='down'?'Spadek':'Wzrost'])
+                    tr.append(A.element('td',String(value)));
+                return tr;
+            }));
             byId('title').textContent=`Zdarzenie ${e.icao}`;
             byId('event-summary').textContent=`${A.time(e.time)} · ${e.analysis.label} · ${e.analysis.reasons.join('; ')}`;
             if(map && Number.isFinite(e.lat) && Number.isFinite(e.lon)) {
@@ -94,7 +118,7 @@
                 const positions=payload.points.map(p=>[p.lat,p.lon]);
                 map.fitBounds(positions.length?positions:[[e.lat,e.lon]],{padding:[25,25],maxZoom:10});
             }
-            if(!payload.points.length) {
+            if(!payload.points.length && !(payload.navigation || []).length) {
                 byId('availability').textContent=`Brak szczegółowych obserwacji w oknie ±2 minuty. Dane są przechowywane przez ${payload.observation_days} dni; starsze zdarzenia zachowują opis i ocenę.`;
                 for(const field of ['altitude','speed'])
                     byId(field+'-chart').append(svgElement('text',{x:20,y:100,fill:'#a8bacb'},'Brak danych'));
@@ -105,7 +129,8 @@
                 (!payload.has_before?'Brak obserwacji sprzed zdarzenia. ':'')+
                 (!payload.has_after?'Brak obserwacji po zdarzeniu — dla bieżącego alarmu odśwież stronę później. ':'')+
                 (payload.truncated?'Pokazano tylko pierwsze 5000 punktów.':'');
-            slider.min=payload.points[0].time;slider.max=payload.points[payload.points.length-1].time;
+            const times=[e.time,...payload.points.map(p=>p.time),...(payload.navigation || []).map(r=>r.time)];
+            slider.min=Math.min(...times);slider.max=Math.max(...times);
             slider.value=Math.max(Number(slider.min),Math.min(Number(slider.max),e.time));
             slider.disabled=false;byId('jump-event').disabled=false;
             byId('play').disabled=slider.min===slider.max;

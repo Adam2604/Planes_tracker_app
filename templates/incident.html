@@ -7,7 +7,7 @@
     <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script defer src="/static/analysis-common.js"></script><script defer src="/static/incident.js"></script>
 </head><body><main data-event-id="{{ event_id }}">
-    <nav><a href="/anomalies">← Zdarzenia</a><a href="/coverage">Wyuczony zasięg</a><a href="/">Mapa na żywo</a></nav>
+    <nav><a href="/anomalies">← Zdarzenia</a><a href="/coverage">Wyuczony zasięg</a><a href="/receiver">Kondycja odbiornika</a><a href="/">Mapa na żywo</a></nav>
     <h1 id="title">Przegląd zdarzenia</h1><p id="event-summary" class="muted">Ładowanie danych…</p>
     <p id="error" class="error" role="alert"></p>
     <div class="panel"><h2>Odtwarzanie obserwacji</h2>
@@ -25,6 +25,14 @@
         </div>
         <p class="muted">Wykresy obejmują całe dostępne okno. Biały kursor: czas odtwarzania · czerwona linia: zdarzenie · pomarańczowe punkty: odrzucone pozycje. Brak wartości przerywa linię.</p>
     </div>
+    <section class="panel"><h2>Jakość nawigacji i stan odbiornika</h2>
+        <h3>W chwili zdarzenia</h3><p id="event-navigation"></p><p id="event-receiver"></p>
+        <h3>W wybranym czasie odtwarzania</h3><p id="selected-navigation"></p><p id="selected-receiver"></p>
+        <p class="muted">NIC: kategoria integralności pozycji · NACp/NACv: kategorie dokładności pozycji/prędkości · SIL: poziom integralności źródła.
+            Są to deklaracje nadajnika. Spadek jakości pomaga wyjaśnić anomalię, ale sam nie potwierdza spoofingu i nie zwiększa punktacji detektora.</p>
+        <h3>Zmiany jakości w oknie zdarzenia</h3><p id="quality-availability" class="muted"></p>
+        <div class="table-scroll"><table><thead><tr><th>Czas</th><th>Wskaźnik</th><th>Przed</th><th>Po</th><th>Zmiana</th></tr></thead><tbody id="quality-changes"></tbody></table></div>
+    </section>
     <section class="panel" aria-labelledby="review-heading"><h2 id="review-heading">Ocena użytkownika</h2>
         <p class="muted">Ocena i notatka pomagają w przeglądzie. Nie zmieniają wyniku detektora ani danych treningowych. Notatka jest dostępna tylko z kluczem dostępu.</p>
         <label for="review-key">Klucz dostępu do ocen</label><input id="review-key" type="password" autocomplete="off">

@@ -31,6 +31,33 @@ def test_raw_rejected_points_and_event_survive_restart(tmp_path):
         assert conn.execute('SELECT accepted,lat FROM observations').fetchone() == (0, 52)
 
 
+def test_replay_quality_and_receiver_context_scoped_and_retained(tmp_path):
+    store = ObservationStore(str(tmp_path / 'telemetry.db'), 'one')
+    store.initialize()
+    base = 40*86400
+    point = observation(base+1000)
+    point['analysis']['navigation'] = {'version': 2}
+    point['analysis']['receiver'] = {'state': 'running'}
+    store.submit(point)
+    for station, track, at in [('one', 'track-a', 1001), ('one', 'other-track', 1002),
+                                ('other', 'track-a', 1003), ('one', 'track-a', 1300)]:
+        writer = ObservationStore(store.path, station)
+        writer.submit(dict(kind='navigation', time=base+at, track_id=track, icao='ABC123', quality={'version': 2}))
+        writer.submit(dict(kind='receiver', time=base+at, health={'state': 'quiet'}))
+        writer.flush()
+    store.flush()
+    event_id = store.recent_events()[0]['id']
+    replay = store.replay(event_id)
+    assert [r['time'] for r in replay['navigation']] == [base+1001]
+    assert [r['time'] for r in replay['receiver']] == [base+1001, base+1002]
+    assert replay['points'][0]['navigation']['version'] == 2
+    assert replay['event']['analysis']['receiver']['state'] == 'running'
+    store.refresh(now=base+1000+8*86400)
+    replay = store.replay(event_id)
+    assert replay['navigation'] == replay['receiver'] == replay['points'] == []
+    assert replay['event']['analysis']['navigation'] == {'version': 2}
+
+
 def test_profiles_exclude_current_day_and_other_station(tmp_path):
     store = ObservationStore(str(tmp_path / 'observations.db'), 'station-a')
     store.initialize()
